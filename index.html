@@ -606,9 +606,8 @@ function getWorldBounds(){
 // ═══════════════════════════════════════
 const isMobile=isTouchDevice;
 let joyActive=false,joyDx=0,joyDy=0,joyTouchId=-1;
-const JOY_R=50; // joystick radius
-
-function getJoyCenter(){return {x:70,y:H-90};}
+let joyCenterX=0,joyCenterY=0; // spawns where you touch
+const JOY_R=50;
 
 // ═══════════════════════════════════════
 // GAME UPDATE
@@ -1022,14 +1021,12 @@ function drawHUD(){
     prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
   }
 
-  // Mobile joystick
-  if(isMobile){
-    const jc=getJoyCenter();
-    G.globalAlpha=.25;G.fillStyle='#fff';
-    G.beginPath();G.arc(jc.x,jc.y,JOY_R,0,Math.PI*2);G.fill();
+  // Mobile joystick — only visible when active
+  if(isMobile&&joyActive){
+    G.globalAlpha=.2;G.fillStyle='#fff';
+    G.beginPath();G.arc(joyCenterX,joyCenterY,JOY_R,0,Math.PI*2);G.fill();
     G.globalAlpha=.5;G.fillStyle='#fff';
-    const kx=jc.x+joyDx*JOY_R*.7, ky=jc.y+joyDy*JOY_R*.7;
-    G.beginPath();G.arc(kx,ky,20,0,Math.PI*2);G.fill();
+    G.beginPath();G.arc(joyCenterX+joyDx*JOY_R*.7,joyCenterY+joyDy*JOY_R*.7,20,0,Math.PI*2);G.fill();
     G.globalAlpha=1;
   }
 
@@ -1112,66 +1109,72 @@ C.addEventListener('click',e=>{
 
 // Keyboard is handled by the HTML input element — no need for manual keydown
 
-// Mobile: virtual joystick
+// Mobile: touch anywhere = joystick spawns there. Two fingers = zoom.
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
-  for(const t of e.changedTouches){
-    const x=t.clientX,y=t.clientY;
-    if(showNamePrompt)return;
-    // Leaderboard
-    if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
-      lbExpanded=!lbExpanded;return;
-    }
-    // Prestige
-    if(prestigeBtnHit){
-      const b=prestigeBtnHit;
-      if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h){doPrestige();return;}
-    }
-    // Joystick
-    const jc=getJoyCenter();
-    if(Math.hypot(x-jc.x,y-jc.y)<JOY_R*1.8){
-      joyActive=true;joyTouchId=t.identifier;
-      joyDx=0;joyDy=0;
-    }
+  if(showNamePrompt)return;
+
+  // Two fingers = start pinch zoom
+  if(e.touches.length===2){
+    joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;
+    const t1=e.touches[0],t2=e.touches[1];
+    pinchDist=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
+    return;
   }
+
+  const t=e.changedTouches[0];
+  const x=t.clientX,y=t.clientY;
+
+  // UI hits
+  if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
+    lbExpanded=!lbExpanded;return;
+  }
+  if(prestigeBtnHit){
+    const b=prestigeBtnHit;
+    if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h){doPrestige();return;}
+  }
+
+  // Joystick spawns wherever you touch
+  joyActive=true;joyTouchId=t.identifier;
+  joyCenterX=x;joyCenterY=y;
+  joyDx=0;joyDy=0;
 });
+
 C.addEventListener('touchmove',e=>{
   e.preventDefault();
+
+  // Pinch zoom (two fingers)
+  if(e.touches.length===2){
+    const t1=e.touches[0],t2=e.touches[1];
+    const d=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
+    if(pinchDist>10){
+      const ratio=d/pinchDist;
+      // Dampen the zoom to prevent wild jumps
+      const dampedRatio=1+(ratio-1)*0.5;
+      camZoom=clamp(camZoom*dampedRatio,CAM_ZOOM_MIN,CAM_ZOOM_MAX);
+    }
+    pinchDist=d;
+    return;
+  }
+
+  // Joystick drag
   for(const t of e.changedTouches){
     if(joyActive&&t.identifier===joyTouchId){
-      const jc=getJoyCenter();
-      const dx=t.clientX-jc.x,dy=t.clientY-jc.y;
-      const d=Math.hypot(dx,dy);
+      const dx=t.clientX-joyCenterX,dy=t.clientY-joyCenterY;
       const maxD=JOY_R;
       joyDx=clamp(dx/maxD,-1,1);
       joyDy=clamp(dy/maxD,-1,1);
     }
   }
 });
+
 C.addEventListener('touchend',e=>{
   for(const t of e.changedTouches){
     if(t.identifier===joyTouchId){joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;}
   }
+  if(e.touches.length<2)pinchDist=0;
 });
-C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;});
-
-// Pinch to zoom
-C.addEventListener('touchstart',e=>{
-  if(e.touches.length===2){
-    const t1=e.touches[0],t2=e.touches[1];
-    pinchDist=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
-  }
-},{passive:true});
-C.addEventListener('touchmove',e=>{
-  if(e.touches.length===2){
-    const t1=e.touches[0],t2=e.touches[1];
-    const d=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
-    if(pinchDist>0){
-      camZoom=clamp(camZoom*(d/pinchDist),CAM_ZOOM_MIN,CAM_ZOOM_MAX);
-      pinchDist=d;
-    }
-  }
-},{passive:true});
+C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;pinchDist=0;});
 
 // Scroll wheel zoom (desktop)
 C.addEventListener('wheel',e=>{
