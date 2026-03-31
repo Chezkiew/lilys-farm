@@ -68,7 +68,7 @@ const TIERS=[
    prodInterval:1.8,maxProd:25,custInterval:3,custPatience:15,
    animalSpeed:25,penW:220,penH:200},
   {id:'duck',name:'Duck Pond',animal:'🦆',animalName:'Duck',
-   product:'🪺',prodName:'Nest Egg',value:15,unlockCost:150,
+   product:'🥚',prodName:'Duck Egg',value:15,unlockCost:150,
    startN:2,maxN:7,animalCost:80,feedMax:12,feedDrain:.7,
    prodInterval:2.2,maxProd:20,custInterval:3,custPatience:14,
    animalSpeed:22,penW:220,penH:200},
@@ -953,6 +953,13 @@ function drawFeeder(fx,fy,level,max){
   G.fillStyle='#fdd835';G.fillRect(fx+3,fy-9+18*(1-p),54,18*p);
   G.font='10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
   G.fillText(`${Math.floor(level)}/${max}`,fx+30,fy+20);
+  // Pulsing indicator when empty
+  if(level<0.5){
+    G.globalAlpha=.5+Math.sin(Date.now()*.005)*.5;
+    G.font='bold 11px sans-serif';G.fillStyle='#ff5722';
+    G.fillText('🌾 FEED ME!',fx+30,fy-20);
+    G.globalAlpha=1;
+  }
 }
 
 function drawArea(x,y,w,h,color,label){
