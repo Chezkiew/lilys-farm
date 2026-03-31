@@ -53,30 +53,58 @@ const TIERS=[
    startN:2,maxN:8,animalCost:60,feedMax:10,feedDrain:.8,
    prodInterval:1.8,maxProd:25,custInterval:3,custPatience:15,
    animalSpeed:25,penW:220,penH:200},
+  {id:'duck',name:'Duck Pond',animal:'🦆',animalName:'Duck',
+   product:'🪺',prodName:'Nest Egg',value:15,unlockCost:150,
+   startN:2,maxN:7,animalCost:80,feedMax:12,feedDrain:.7,
+   prodInterval:2.2,maxProd:20,custInterval:3,custPatience:14,
+   animalSpeed:22,penW:220,penH:200},
   {id:'cow',name:'Cow Pasture',animal:'🐄',animalName:'Cow',
-   product:'🥛',prodName:'Milk',value:25,unlockCost:300,
+   product:'🥛',prodName:'Milk',value:25,unlockCost:400,
    startN:2,maxN:6,animalCost:150,feedMax:15,feedDrain:.5,
    prodInterval:3.5,maxProd:15,custInterval:4,custPatience:12,
    animalSpeed:15,penW:240,penH:200},
   {id:'pig',name:'Pig Pen',animal:'🐷',animalName:'Pig',
-   product:'🥓',prodName:'Bacon',value:45,unlockCost:1000,
+   product:'🥓',prodName:'Bacon',value:45,unlockCost:1200,
    startN:2,maxN:5,animalCost:300,feedMax:20,feedDrain:.4,
    prodInterval:4,maxProd:12,custInterval:5,custPatience:10,
    animalSpeed:20,penW:240,penH:200},
+  {id:'goat',name:'Goat Yard',animal:'🐐',animalName:'Goat',
+   product:'🧀',prodName:'Cheese',value:60,unlockCost:3000,
+   startN:2,maxN:5,animalCost:400,feedMax:22,feedDrain:.35,
+   prodInterval:4.5,maxProd:10,custInterval:5,custPatience:10,
+   animalSpeed:22,penW:230,penH:200},
   {id:'sheep',name:'Sheep Farm',animal:'🐑',animalName:'Sheep',
-   product:'🧶',prodName:'Wool',value:70,unlockCost:3000,
+   product:'🧶',prodName:'Wool',value:80,unlockCost:6000,
    startN:2,maxN:5,animalCost:500,feedMax:25,feedDrain:.3,
    prodInterval:5,maxProd:10,custInterval:6,custPatience:10,
    animalSpeed:18,penW:240,penH:200},
   {id:'bee',name:'Bee Hive',animal:'🐝',animalName:'Bee',
-   product:'🍯',prodName:'Honey',value:120,unlockCost:8000,
+   product:'🍯',prodName:'Honey',value:120,unlockCost:12000,
    startN:3,maxN:10,animalCost:400,feedMax:30,feedDrain:.25,
    prodInterval:6,maxProd:8,custInterval:7,custPatience:8,
    animalSpeed:35,penW:200,penH:180},
+  {id:'flamingo',name:'Flamingo Lagoon',animal:'🦩',animalName:'Flamingo',
+   product:'🪶',prodName:'Feather',value:200,unlockCost:25000,
+   startN:2,maxN:6,animalCost:800,feedMax:35,feedDrain:.2,
+   prodInterval:7,maxProd:6,custInterval:8,custPatience:8,
+   animalSpeed:20,penW:240,penH:200},
 ];
 
 // ═══════════════════════════════════════
-// GAME STATE
+// PRESTIGE — persists across resets
+// ═══════════════════════════════════════
+let prestigeStars=0; // permanent multiplier
+let prestigeLifetimeEarned=0; // tracks total across all runs
+const PRESTIGE_THRESHOLD=5000; // first prestige at 5k earned
+const PRESTIGE_MULT=1.8; // each prestige needs 1.8x more
+const HAT_COLORS=['#fdd835','#e91e63','#4caf50','#2196f3','#ff9800','#9c27b0','#f44336','#00bcd4','#ff5722','#795548'];
+function prestigeBonus(){return 1+prestigeStars*0.25;} // +25% per star
+function prestigeCost(){return Math.floor(PRESTIGE_THRESHOLD*Math.pow(PRESTIGE_MULT,prestigeStars));}
+function lilyHat(){return HAT_COLORS[prestigeStars%HAT_COLORS.length];}
+let showPrestigeBtn=false;
+
+// ═══════════════════════════════════════
+// GAME STATE (resets on prestige)
 // ═══════════════════════════════════════
 let coins=0,totalEarned=0,speedLvl=0,carryLvl=0,wheatLvl=0;
 let camX=0,camY=0,targetX=350,targetY=250;
@@ -88,15 +116,134 @@ const lily={x:350,y:250,dir:0,wf:0,stack:[],
   maxC(){return 5+carryLvl*3}};
 
 // Wheat
-const wheat={x:50,y:130,w:220,h:180,tiles:[],regrow:3};
-for(let r=0;r<3;r++)for(let c=0;c<4;c++)
-  wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+r*52,grown:true,timer:0});
+let wheat={x:50,y:130,w:220,h:180,tiles:[],regrow:3};
+function initWheat(){
+  wheat.tiles=[];wheat.w=220;wheat.h=180;
+  for(let r=0;r<3;r++)for(let c=0;c<4;c++)
+    wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+r*52,grown:true,timer:0});
+}
+initWheat();
 
 // Active tiers (runtime state for each unlocked tier)
-const activeTiers=[]; // {tier, pen, booth, animals, products, pads, workers, feedLevel, feedTimer, prodTimer, custTimer}
+let activeTiers=[]; // {tier, pen, booth, animals, products, pads, workers, feedLevel, feedTimer, prodTimer, custTimer}
 
 // All world pads
 let allPads=[];
+
+// ═══════════════════════════════════════
+// SAVE / LOAD — localStorage
+// ═══════════════════════════════════════
+const SAVE_KEY='lilys_farm_save';
+const SAVE_INTERVAL=5; // seconds
+let saveTimer=0;
+
+function saveGame(){
+  const data={
+    v:2, // version
+    coins, totalEarned, speedLvl, carryLvl, wheatLvl,
+    prestigeStars, prestigeLifetimeEarned,
+    wheatTileCount:wheat.tiles.length,
+    tiers:activeTiers.map(ts=>({
+      idx:ts.tierIdx,
+      feedLevel:ts.feedLevel,
+      animalCount:ts.animals.length,
+      workerTypes:ts.workers.map(w=>w.type),
+      workerSpeeds:ts.workers.map(w=>w.speed),
+      workerStacks:ts.workers.map(w=>w.maxStack),
+    })),
+  };
+  try{localStorage.setItem(SAVE_KEY,JSON.stringify(data));}catch(e){}
+}
+
+function loadGame(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY);
+    if(!raw)return false;
+    const d=JSON.parse(raw);
+    if(!d||d.v<2)return false;
+
+    prestigeStars=d.prestigeStars||0;
+    prestigeLifetimeEarned=d.prestigeLifetimeEarned||0;
+    coins=d.coins||0;
+    totalEarned=d.totalEarned||0;
+    speedLvl=d.speedLvl||0;
+    carryLvl=d.carryLvl||0;
+    wheatLvl=d.wheatLvl||0;
+
+    // Rebuild wheat
+    initWheat();
+    const extraRows=Math.floor((d.wheatTileCount-12)/4);
+    for(let r=0;r<extraRows;r++){
+      const row=3+r;
+      for(let c=0;c<4;c++)wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+row*52,grown:true,timer:0});
+      wheat.h+=52;
+    }
+
+    // Rebuild tiers
+    activeTiers=[];allPads=[];
+    rebuildGlobalPads();
+    d.tiers.forEach(td=>{
+      activateTier(td.idx);
+      const ts=activeTiers[activeTiers.length-1];
+      ts.feedLevel=td.feedLevel||0;
+      // Add extra animals
+      while(ts.animals.length<td.animalCount){
+        ts.animals.push({x:rnd(ts.pen.x+30,ts.pen.x+ts.pen.w-30),y:rnd(ts.pen.y+30,ts.pen.y+ts.pen.h-60),tx:0,ty:0,timer:rnd(0,3)});
+      }
+      // Recreate workers
+      td.workerTypes.forEach((wt,i)=>{
+        const w=mkWorker(wt,wt==='seller'?ts.booth.x:ts.pen.x+ts.pen.w/2,wt==='seller'?ts.booth.y+35:ts.pen.y+ts.pen.h/2,ts);
+        w.speed=td.workerSpeeds[i]||90;
+        w.maxStack=td.workerStacks[i]||6;
+        ts.workers.push(w);
+      });
+    });
+    markNextTier();
+    return true;
+  }catch(e){return false;}
+}
+
+// ═══════════════════════════════════════
+// PRESTIGE — reset for permanent bonus
+// ═══════════════════════════════════════
+function doPrestige(){
+  prestigeStars++;
+  prestigeLifetimeEarned+=totalEarned;
+
+  // Reset game state
+  coins=0;totalEarned=0;speedLvl=0;carryLvl=0;wheatLvl=0;
+  lily.x=350;lily.y=250;lily.stack=[];lily.dir=0;lily.wf=0;
+  targetX=350;targetY=250;camX=0;camY=0;
+  floats=[];flies=[];showPrestigeBtn=false;
+
+  // Reset wheat
+  initWheat();
+
+  // Reset tiers and pads
+  activeTiers=[];
+  allPads=[];
+  rebuildGlobalPads();
+  activateTier(0);
+  markNextTier();
+
+  saveGame();
+  sfxUnlock();
+  floats.push({x:lily.x,y:lily.y-40,text:`⭐ Prestige ${prestigeStars}! +25% bonus!`,t:3,color:'#fdd835'});
+}
+
+function rebuildGlobalPads(){
+  globalPads.length=0;
+  globalPads.push(
+    mkPad(10,wheat.y+wheat.h+20,'👟','Speed',Math.floor(50*Math.pow(1.5,speedLvl)),()=>{speedLvl++;globalPads[0].paid=0;globalPads[0].cost=Math.floor(50*Math.pow(1.5,speedLvl))},true,0,10),
+    mkPad(10,wheat.y+wheat.h+100,'📦','Carry',Math.floor(40*Math.pow(1.5,carryLvl)),()=>{carryLvl++;globalPads[1].paid=0;globalPads[1].cost=Math.floor(40*Math.pow(1.5,carryLvl))},true,0,8),
+    mkPad(10,wheat.y+wheat.h+180,'⚡','Fast Wheat',Math.floor(120*Math.pow(1.6,wheatLvl)),()=>{wheatLvl++;globalPads[2].paid=0;globalPads[2].cost=Math.floor(120*Math.pow(1.6,wheatLvl))},true,0,5),
+    mkPad(wheat.x+wheat.w+20,wheat.y+wheat.h+20,'🌾','+Wheat',80,(p)=>{
+      const row=Math.floor(wheat.tiles.length/4);
+      for(let c=0;c<4;c++)wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+row*52,grown:true,timer:0});
+      wheat.h+=52;p.y+=52;p.paid=0;p.cost=Math.floor(p.cost*1.5);
+    },true,0,4),
+  );
+}
 
 // ═══════════════════════════════════════
 // LAYOUT — positions tiers on the map
@@ -220,30 +367,20 @@ function rebuildPads(){
   allPads=gp.concat(allPads.filter(p=>p._isNextTier));
 }
 
-// Global upgrade pads
-const globalPads=[
-  mkPad(10,wheat.y+wheat.h+20,'👟','Speed',50,()=>{speedLvl++;globalPads[0].paid=0;globalPads[0].cost=Math.floor(50*Math.pow(1.5,speedLvl))},true,0,10),
-  mkPad(10,wheat.y+wheat.h+100,'📦','Carry',40,()=>{carryLvl++;globalPads[1].paid=0;globalPads[1].cost=Math.floor(40*Math.pow(1.5,carryLvl))},true,0,8),
-  mkPad(10,wheat.y+wheat.h+180,'⚡','Fast Wheat',120,()=>{wheatLvl++;globalPads[2].paid=0;globalPads[2].cost=Math.floor(120*Math.pow(1.6,wheatLvl))},true,0,5),
-  mkPad(wheat.x+wheat.w+20,wheat.y+wheat.h+20,'🌾','+Wheat',80,(p)=>{
-    // Add a row of wheat
-    const row=Math.floor(wheat.tiles.length/4);
-    for(let c=0;c<4;c++)wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+row*52,grown:true,timer:0});
-    wheat.h+=52;
-    p.y+=52; // move pad down
-    p.paid=0;p.cost=Math.floor(p.cost*1.5);
-  },true,0,4),
-];
-allPads=[...globalPads];
+// Global upgrade pads (rebuilt dynamically)
+const globalPads=[];
 
-// Mark next-tier pads
 function markNextTier(){
   allPads.forEach(p=>{if(!globalPads.includes(p)&&!activeTiers.some(s=>s.pads.includes(p)))p._isNextTier=true});
 }
 
-// Start with chickens
-activateTier(0);
-markNextTier();
+// ─── INIT: load save or start fresh ───
+if(!loadGame()){
+  rebuildGlobalPads();
+  allPads=[...globalPads];
+  activateTier(0);
+  markNextTier();
+}
 
 // ═══════════════════════════════════════
 // CUSTOMER DRAWING DATA
@@ -417,7 +554,13 @@ function getJoyCenter(){return {x:70,y:H-90};}
 // ═══════════════════════════════════════
 // GAME UPDATE
 // ═══════════════════════════════════════
-function addCoins(n,x,y){coins+=n;totalEarned+=n;if(x!==undefined){floats.push({x,y:y-20,text:`+${n}🪙`,t:1,color:'#fdd835'});sfxCoin()}}
+function addCoins(n,x,y){
+  n=Math.floor(n*prestigeBonus()); // prestige multiplier
+  coins+=n;totalEarned+=n;
+  if(x!==undefined){floats.push({x,y:y-20,text:`+${n}🪙`,t:1,color:'#fdd835'});sfxCoin();}
+  // Check prestige availability
+  if(totalEarned>=prestigeCost())showPrestigeBtn=true;
+}
 let sellCD=0;
 
 function update(dt){
@@ -562,6 +705,10 @@ function update(dt){
       }
     }
   });
+
+  // ─── Auto-save ───
+  saveTimer+=dt;
+  if(saveTimer>=SAVE_INTERVAL){saveTimer=0;saveGame();}
 
   // ─── Animate ───
   flies.forEach(f=>{f.t+=dt;const p=Math.min(1,f.t/f.dur);f.x=lerp(f.x,f.tx,p*.4);f.y=lerp(f.y,f.ty,p*.4);f.y-=(1-p)*50*dt});
@@ -729,8 +876,8 @@ function drawWorld(){
   // All pads
   allPads.forEach(drawPad);
 
-  // Lily
-  drawChar(lily.x,lily.y,lily.dir,lily.wf,'#e91e63','#fdd835','#5d4037');
+  // Lily — hat color changes with prestige
+  drawChar(lily.x,lily.y,lily.dir,lily.wf,'#e91e63',lilyHat(),'#5d4037');
   drawStack(lily.x,lily.y,lily.stack);
 
   // World boundary fence
@@ -754,9 +901,18 @@ function drawWorld(){
 // ═══════════════════════════════════════
 // HUD
 // ═══════════════════════════════════════
+let prestigeBtnHit=null; // {x,y,w,h} for click detection
+
 function drawHUD(){
   G.fillStyle='rgba(62,39,35,0.88)';G.fillRect(0,0,W,42);
   G.font='bold 22px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';G.fillText(`🪙 ${coins}`,14,30);
+
+  // Prestige stars
+  if(prestigeStars>0){
+    G.font='14px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';
+    G.fillText(`${'⭐'.repeat(Math.min(prestigeStars,10))} x${prestigeBonus().toFixed(2)}`,140,30);
+  }
+
   G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
   G.font='12px sans-serif';G.fillStyle='#aaa';G.fillText(`Carry: ${lily.carry()}/${lily.maxC()}`,W/2,35);
 
@@ -781,6 +937,24 @@ function drawHUD(){
     G.globalAlpha=1;
   }
 
+  // Prestige button
+  prestigeBtnHit=null;
+  if(showPrestigeBtn){
+    const bw=200,bh=44;
+    const bx=W/2-bw/2,by=H-bh-16;
+    const pulse=.8+Math.sin(Date.now()*.005)*.2;
+    G.fillStyle=`rgba(156,39,176,${pulse})`;
+    G.beginPath();
+    G.roundRect(bx,by,bw,bh,12);
+    G.fill();
+    G.strokeStyle='#e1bee7';G.lineWidth=2;G.stroke();
+    G.font='bold 16px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+    G.fillText(`⭐ Prestige (${prestigeStars}→${prestigeStars+1})`,bx+bw/2,by+18);
+    G.font='11px sans-serif';G.fillStyle='#e1bee7';
+    G.fillText(`Reset farm for +25% bonus forever`,bx+bw/2,by+34);
+    prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
+  }
+
   // Mobile joystick
   if(isMobile){
     const jc=getJoyCenter();
@@ -801,10 +975,28 @@ function s2w(sx,sy){return{x:sx+camX,y:sy+camY}}
 // Desktop: cursor follow
 C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;targetY=w.y;});
 
+// Click: prestige button
+C.addEventListener('click',e=>{
+  if(prestigeBtnHit){
+    const b=prestigeBtnHit;
+    if(e.clientX>=b.x&&e.clientX<=b.x+b.w&&e.clientY>=b.y&&e.clientY<=b.y+b.h){
+      doPrestige();
+    }
+  }
+});
+
 // Mobile: virtual joystick
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
+    // Prestige button
+    if(prestigeBtnHit){
+      const b=prestigeBtnHit;
+      if(t.clientX>=b.x&&t.clientX<=b.x+b.w&&t.clientY>=b.y&&t.clientY<=b.y+b.h){
+        doPrestige();return;
+      }
+    }
+    // Joystick
     const jc=getJoyCenter();
     if(Math.hypot(t.clientX-jc.x,t.clientY-jc.y)<JOY_R*1.8){
       joyActive=true;joyTouchId=t.identifier;
