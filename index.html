@@ -317,12 +317,13 @@ function rebuildGlobalPads(){
 // LAYOUT — positions tiers on the map
 // ═══════════════════════════════════════
 function tierPos(idx){
-  // Single column layout, each tier stacked below the previous with plenty of space
+  // Layout: wheat on far left, highway, then pens+booths to the right
+  // Plenty of space between highway and pens for pads
   return {
-    penX: 350,
-    penY: 100 + idx * 300,
-    boothX: 680,
-    boothY: 130 + idx * 300,
+    penX: 500,
+    penY: 100 + idx * 320,
+    boothX: 850,
+    boothY: 130 + idx * 320,
   };
 }
 
@@ -356,42 +357,42 @@ function activateTier(tierIdx){
   const px=pen.x, py=pen.y, bx=booth.x, by=booth.y;
   const pads=[];
 
-  // More animals — left of pen (avoid paths)
-  const ap=safePadPos(px-90,py+30);
-  pads.push(mkPad(ap.x,ap.y,cfg.animal,`+1 ${cfg.animalName}`,cfg.animalCost,
+  // Zone between highway (380) and pen (500): feeder & animal pads
+  const midX=420; // between highway and pen
+
+  // More animals
+  pads.push(mkPad(midX,py,cfg.animal,`+1 ${cfg.animalName}`,cfg.animalCost,
     (p)=>{
       state.animals.push({x:rnd(pen.x+30,pen.x+pen.w-30),y:rnd(pen.y+30,pen.y+pen.h-60),tx:0,ty:0,timer:0});
       if(state.animals.length>=cfg.maxN)p.done=true;
       else{p.paid=0;p.cost=Math.floor(p.cost*1.4);}
     },true,0,cfg.maxN-cfg.startN));
 
-  // Feeder worker — harvests wheat and delivers to this tier's feeder
-  pads.push(mkPad(px-90,py+120,'🧑‍🌾','Feeder',200+tierIdx*100,
+  // Feeder worker — between highway and pen, lower
+  pads.push(mkPad(midX,py+90,'🧑‍🌾','Feeder',200+tierIdx*100,
     (p)=>{
       p.done=true;
       const w=mkWorker('feeder',ts.feederX+30,ts.feederY+30,state);
       state.workers.push(w);
-      // Worker upgrades — below feeder pad
-      pads.push(mkPad(px-90,py+200,'⚡','F.Speed',80,(p2)=>{
+      pads.push(mkPad(midX,py+170,'⚡','F.Speed',80,(p2)=>{
         w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
       },true,0,5));
-      pads.push(mkPad(px-90,py+270,'📦','F.Carry',100,(p2)=>{
+      pads.push(mkPad(midX,py+240,'📦','F.Carry',100,(p2)=>{
         w.maxStack+=3;p2.paid=0;p2.cost=Math.floor(p2.cost*1.5);
       },true,0,4));
       rebuildPads();
     }));
 
-  // Seller worker — below booth
-  pads.push(mkPad(bx-20,by+80,'🧑‍💼','Seller',250+tierIdx*120,
+  // Seller worker — right of booth
+  pads.push(mkPad(bx+60,by,'🧑‍💼','Seller',250+tierIdx*120,
     (p)=>{
       p.done=true;
       const w=mkWorker('seller',bx,by+35,state);
       state.workers.push(w);
-      // Worker upgrades — to the right of booth
-      pads.push(mkPad(bx+70,by+80,'⚡','W.Speed',80,(p2)=>{
+      pads.push(mkPad(bx+60,by+80,'⚡','S.Speed',80,(p2)=>{
         w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
       },true,0,5));
-      pads.push(mkPad(bx+70,by+160,'📦','W.Carry',100,(p2)=>{
+      pads.push(mkPad(bx+60,by+150,'📦','S.Carry',100,(p2)=>{
         w.maxStack+=3;p2.paid=0;p2.cost=Math.floor(p2.cost*1.5);
       },true,0,4));
       rebuildPads();
@@ -405,8 +406,8 @@ function activateTier(tierIdx){
     const next=TIERS[tierIdx+1];
     const curY=pos.penY;
     const nextY=curY + 300; // matches tierPos spacing
-    const unlockY=curY + pen.h + 40; // just below current pen, well above next
-    const p=mkPad(pen.x+pen.w/2-40, unlockY, next.animal,next.name,next.unlockCost,
+    const unlockY=curY + pen.h + 50;
+    const p=mkPad(pen.x+60, unlockY, next.animal,next.name,next.unlockCost,
       ()=>activateTier(tierIdx+1),false,0,0,52);
     p._isNextTier=true;
     allPads.push(p);
@@ -443,18 +444,20 @@ function markNextTier(){
   allPads.forEach(p=>{if(!globalPads.includes(p)&&!activeTiers.some(s=>s.pads.includes(p)))p._isNextTier=true});
 }
 
+// Highway X position — centered between wheat field and pens
+const HW_X=380;
+
 // Path rectangles for collision — pads should not overlap these
 function getPathRects(){
   const rects=[];
-  const P=30; // path width + margin
-  const hwX=wheat.x+wheat.w+40;
+  const P=30;
   if(activeTiers.length>0){
     const lastTier=activeTiers[activeTiers.length-1];
-    rects.push({x:hwX-P,y:wheat.y,w:P*2,h:lastTier.feederY-wheat.y+50}); // vertical highway
+    rects.push({x:HW_X-P,y:wheat.y,w:P*2,h:lastTier.feederY-wheat.y+50}); // vertical highway
   }
-  rects.push({x:wheat.x+wheat.w,y:wheat.y+wheat.h/2-P,w:hwX-wheat.x-wheat.w+P,h:P*2}); // wheat to highway
+  rects.push({x:wheat.x+wheat.w,y:wheat.y+wheat.h/2-P,w:HW_X-wheat.x-wheat.w+P,h:P*2}); // wheat to highway
   activeTiers.forEach(ts=>{
-    rects.push({x:hwX-P,y:ts.feederY-P,w:ts.feederX-hwX+P*2,h:P*2}); // highway to feeder
+    rects.push({x:HW_X-P,y:ts.feederY-P,w:ts.feederX-HW_X+P*2,h:P*2}); // highway to feeder
     rects.push({x:ts.pen.x+ts.pen.w,y:ts.pen.y+ts.pen.h/2-P,w:ts.booth.x-ts.pen.x-ts.pen.w,h:P*2}); // pen to booth
   });
   return rects;
@@ -605,7 +608,7 @@ function updateWorker(w,dt){
 function getWorldBounds(){
   // Start with wheat field area
   let x1=wheat.x-30, y1=wheat.y-40;
-  let x2=wheat.x+wheat.w+100, y2=wheat.y+wheat.h+80;
+  let x2=wheat.x+wheat.w+200, y2=wheat.y+wheat.h+80;
 
   // Expand for each active tier
   activeTiers.forEach(ts=>{
@@ -928,20 +931,19 @@ function drawWorld(){
   // Paths — wheat to each feeder, pen to booth
   G.fillStyle='#a1887f';
   const PATH_W=24;
-  // Main vertical highway from wheat area down
-  const hwX=wheat.x+wheat.w+40;
   if(activeTiers.length>0){
     const lastTier=activeTiers[activeTiers.length-1];
-    G.fillRect(hwX-PATH_W/2,wheat.y+wheat.h/2-12,PATH_W,lastTier.feederY-wheat.y-wheat.h/2+30);
+    // Vertical highway
+    G.fillRect(HW_X-PATH_W/2,wheat.y+wheat.h/2,PATH_W,lastTier.feederY-wheat.y-wheat.h/2+30);
   }
   activeTiers.forEach(ts=>{
-    // Horizontal from highway to feeder
-    G.fillRect(hwX,ts.feederY-PATH_W/2,ts.feederX-hwX,PATH_W);
-    // Horizontal from pen to booth
+    // Horizontal: highway to feeder
+    G.fillRect(HW_X,ts.feederY-PATH_W/2,ts.feederX-HW_X,PATH_W);
+    // Horizontal: pen to booth
     G.fillRect(ts.pen.x+ts.pen.w,ts.pen.y+ts.pen.h/2-PATH_W/2,ts.booth.x-ts.pen.x-ts.pen.w,PATH_W);
   });
   // Wheat field to highway
-  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-PATH_W/2,hwX-wheat.x-wheat.w+PATH_W/2,PATH_W);
+  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-PATH_W/2,HW_X-wheat.x-wheat.w,PATH_W);
 
   // Wheat field
   drawArea(wheat.x,wheat.y,wheat.w,wheat.h,'#8d6e63','🌾 Wheat Field');
