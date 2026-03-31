@@ -355,6 +355,10 @@ function activateTier(tierIdx){
     pads:[], // local pads for this tier
   };
 
+  // Add tier to activeTiers BEFORE creating pads so collision detection sees this pen
+  state.pads=[];
+  activeTiers.push(state);
+
   // Create upgrade pads for this tier — spread around pen and booth
   const px=pen.x, py=pen.y, bx=booth.x, by=booth.y;
   const pads=[];
@@ -401,7 +405,6 @@ function activateTier(tierIdx){
     }));
 
   state.pads=pads;
-  activeTiers.push(state);
 
   // Unlock pad for NEXT tier — centered between current and next row
   if(tierIdx+1<TIERS.length){
