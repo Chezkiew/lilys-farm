@@ -120,10 +120,8 @@ let showPrestigeBtn=false;
 // ═══════════════════════════════════════
 // LEADERBOARD
 // ═══════════════════════════════════════
-// Leaderboard via GitHub repo file (CORS works on raw.githubusercontent.com)
-const LB_READ='https://raw.githubusercontent.com/Chezkiew/lilys-farm/main/leaderboard.json';
-const LB_API='https://api.github.com/repos/Chezkiew/lilys-farm/contents/leaderboard.json';
-const LB_TOKEN='PASTE_YOUR_TOKEN_HERE'; // fine-grained PAT with Contents:write on this repo only
+// Leaderboard via Cloudflare Worker + KV
+const LB_URL='https://lilys-farm-leaderboard.chezkie.workers.dev';
 let playerName=localStorage.getItem('lilys_farm_name')||'';
 let leaderboard=[];
 let lbExpanded=false;
@@ -133,29 +131,16 @@ let showNamePrompt=!playerName;
 let nameInput='';
 
 function fetchLeaderboard(){
-  fetch(LB_READ+'?t='+Date.now()) // cache-bust
+  fetch(LB_URL+'/leaderboard')
     .then(r=>r.json()).then(d=>{leaderboard=Array.isArray(d)?d:[];}).catch(()=>{});
 }
 
 function pushStats(){
-  if(!playerName||LB_TOKEN==='PASTE_YOUR_TOKEN_HERE')return;
-  // Read current file (need sha for update)
-  fetch(LB_API,{headers:{Authorization:'Bearer '+LB_TOKEN,'Accept':'application/vnd.github+json'}})
-    .then(r=>r.json()).then(file=>{
-      const board=JSON.parse(atob(file.content))||[];
-      const entry={name:playerName.slice(0,20),prestige:prestigeStars,totalEarned,
-        tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned,
-        lastSeen:Date.now()};
-      const idx=board.findIndex(p=>p.name.toLowerCase()===playerName.toLowerCase());
-      if(idx>=0)board[idx]=entry;else board.push(entry);
-      board.sort((a,b)=>b.prestige-a.prestige||b.lifetimeEarned-a.lifetimeEarned);
-      const trimmed=board.slice(0,50);
-      leaderboard=trimmed;
-      return fetch(LB_API,{method:'PUT',
-        headers:{Authorization:'Bearer '+LB_TOKEN,'Accept':'application/vnd.github+json','Content-Type':'application/json'},
-        body:JSON.stringify({message:'Update leaderboard',content:btoa(JSON.stringify(trimmed,null,2)),sha:file.sha})
-      });
-    }).catch(()=>{});
+  if(!playerName)return;
+  fetch(LB_URL+'/update',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:playerName,prestige:prestigeStars,totalEarned,
+      tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned})
+  }).then(()=>fetchLeaderboard()).catch(()=>{});
 }
 
 // Initial fetch
