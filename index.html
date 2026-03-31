@@ -152,8 +152,15 @@ if(playerName)setTimeout(fetchLeaderboard,500);
 let coins=0,totalEarned=0,speedLvl=0,carryLvl=0,wheatLvl=0;
 const isTouchDevice='ontouchstart' in window;
 let camX=0,camY=0,targetX=350,targetY=250;
-let camZoom=isTouchDevice?0.7:1; // mobile starts zoomed out
-const CAM_ZOOM_MIN=0.35,CAM_ZOOM_MAX=1.2;
+let camZoom=isTouchDevice?0.7:1;
+const CAM_ZOOM_MAX=1.2;
+function camZoomMin(){
+  // Calculate zoom needed to fit entire farm on screen
+  const b=getWorldBounds();
+  const farmW=b.x2-b.x1+100, farmH=b.y2-b.y1+100;
+  const fitZoom=Math.min(W/farmW, H/farmH);
+  return Math.min(0.35, fitZoom); // never more than 0.35, but can go lower for big farms
+}
 let pinchDist=0;
 let floats=[],flies=[];
 
@@ -1276,7 +1283,7 @@ C.addEventListener('touchmove',e=>{
       const ratio=d/pinchDist;
       // Dampen the zoom to prevent wild jumps
       const dampedRatio=1+(ratio-1)*0.5;
-      camZoom=clamp(camZoom*dampedRatio,CAM_ZOOM_MIN,CAM_ZOOM_MAX);
+      camZoom=clamp(camZoom*dampedRatio,camZoomMin(),CAM_ZOOM_MAX);
     }
     pinchDist=d;
     return;
@@ -1304,7 +1311,7 @@ C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId
 // Scroll wheel zoom (desktop)
 C.addEventListener('wheel',e=>{
   e.preventDefault();
-  camZoom=clamp(camZoom*(e.deltaY>0?0.92:1.08),CAM_ZOOM_MIN,CAM_ZOOM_MAX);
+  camZoom=clamp(camZoom*(e.deltaY>0?0.92:1.08),camZoomMin(),CAM_ZOOM_MAX);
 },{passive:false});
 
 // ═══════════════════════════════════════
