@@ -344,7 +344,7 @@ function activateTier(tierIdx){
   const pos=tierPos(tierIdx);
 
   const pen={x:pos.penX,y:pos.penY,w:cfg.penW,h:cfg.penH};
-  const feederX=pen.x, feederY=pen.y+pen.h-20;
+  const feederX=pen.x, feederY=pen.y+pen.h+15; // below pen, accessible from outside
   const booth={x:pos.boothX,y:pos.boothY,customers:[],custTimer:0};
 
   const animals=[];
@@ -774,7 +774,7 @@ function update(dt){
     const cfg=ts.tier;
 
     // Feeder: Lily dumps wheat
-    if(dist(lily,{x:ts.feederX+30,y:ts.feederY})<45){
+    if(dist(lily,{x:ts.feederX+30,y:ts.feederY})<55){
       for(let i=lily.stack.length-1;i>=0;i--){
         if(lily.stack[i].type==='wheat'&&ts.feedLevel<ts.feedMax){
           flies.push({x:lily.x,y:lily.y-20,tx:ts.feederX+30,ty:ts.feederY,emoji:'🌾',t:0,dur:.25});
