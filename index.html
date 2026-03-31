@@ -714,6 +714,7 @@ function getWorldBounds(){
 // MOBILE DETECTION + JOYSTICK
 // ═══════════════════════════════════════
 const isMobile=isTouchDevice;
+const TOP_PAD=isMobile?36:0; // offset for mobile browser chrome/notch
 let joyActive=false,joyDx=0,joyDy=0,joyTouchId=-1;
 let joyCenterX=0,joyCenterY=0; // spawns where you touch
 const JOY_R=50;
@@ -1147,7 +1148,9 @@ function drawWorld(){
 let prestigeBtnHit=null; // {x,y,w,h} for click detection
 
 function drawHUD(){
-  G.fillStyle='rgba(62,39,35,0.88)';G.fillRect(0,0,W,42);
+  G.save();
+  G.translate(0,TOP_PAD);
+  G.fillStyle='rgba(62,39,35,0.88)';G.fillRect(0,-TOP_PAD,W,42+TOP_PAD); // extend bar up to cover notch area
   G.font='bold 22px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';
   const coinText=`🪙 ${coins}`;
   G.fillText(coinText,14,30);
@@ -1171,7 +1174,7 @@ function drawHUD(){
     G.strokeStyle='#e1bee7';G.lineWidth=1;G.stroke();
     G.font='bold 10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
     G.fillText(`⭐ Prestige`,bx+bw/2,by+15);
-    prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
+    prestigeBtnHit={x:bx,y:by+TOP_PAD,w:bw,h:bh}; // offset for click detection
   }
 
   // Save indicator
@@ -1203,6 +1206,7 @@ function drawHUD(){
     G.globalAlpha=1;
   }
 
+  G.restore();
   // Prestige button is in the top bar (drawHUD)
 
   // Mobile joystick — only visible when active
@@ -1237,7 +1241,7 @@ function drawHUD(){
         G.fillText(`${p.tiersUnlocked} tiers · ${p.lifetimeEarned||0}🪙`,lbX+lbW-8,y);
       }
     });
-    lbHitBox={x:lbX,y:lbY,w:lbW,h:lbH};
+    lbHitBox={x:lbX,y:lbY+TOP_PAD,w:lbW,h:lbH};
   } else lbHitBox=null;
 
 }
