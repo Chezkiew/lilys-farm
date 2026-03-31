@@ -120,7 +120,10 @@ let showPrestigeBtn=false;
 // ═══════════════════════════════════════
 // LEADERBOARD
 // ═══════════════════════════════════════
-const LB_BLOB='https://jsonblob.com/api/jsonBlob/019d4224-a990-7cca-8fab-0290bf74637b';
+// Leaderboard via GitHub repo file (CORS works on raw.githubusercontent.com)
+const LB_READ='https://raw.githubusercontent.com/Chezkiew/lilys-farm/main/leaderboard.json';
+const LB_API='https://api.github.com/repos/Chezkiew/lilys-farm/contents/leaderboard.json';
+const LB_TOKEN='PASTE_YOUR_TOKEN_HERE'; // fine-grained PAT with Contents:write on this repo only
 let playerName=localStorage.getItem('lilys_farm_name')||'';
 let leaderboard=[];
 let lbExpanded=false;
@@ -128,19 +131,18 @@ let lbTimer=0;
 const LB_REFRESH=120;
 let showNamePrompt=!playerName;
 let nameInput='';
-let nameCursorBlink=0;
 
 function fetchLeaderboard(){
-  fetch(LB_BLOB,{headers:{'Content-Type':'application/json'}})
+  fetch(LB_READ+'?t='+Date.now()) // cache-bust
     .then(r=>r.json()).then(d=>{leaderboard=Array.isArray(d)?d:[];}).catch(()=>{});
 }
 
 function pushStats(){
-  if(!playerName)return;
-  // Fetch current board, update our entry, push back
-  fetch(LB_BLOB,{headers:{'Content-Type':'application/json'}})
-    .then(r=>r.json()).then(board=>{
-      if(!Array.isArray(board))board=[];
+  if(!playerName||LB_TOKEN==='PASTE_YOUR_TOKEN_HERE')return;
+  // Read current file (need sha for update)
+  fetch(LB_API,{headers:{Authorization:'Bearer '+LB_TOKEN,'Accept':'application/vnd.github+json'}})
+    .then(r=>r.json()).then(file=>{
+      const board=JSON.parse(atob(file.content))||[];
       const entry={name:playerName.slice(0,20),prestige:prestigeStars,totalEarned,
         tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned,
         lastSeen:Date.now()};
@@ -149,8 +151,10 @@ function pushStats(){
       board.sort((a,b)=>b.prestige-a.prestige||b.lifetimeEarned-a.lifetimeEarned);
       const trimmed=board.slice(0,50);
       leaderboard=trimmed;
-      return fetch(LB_BLOB,{method:'PUT',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(trimmed)});
+      return fetch(LB_API,{method:'PUT',
+        headers:{Authorization:'Bearer '+LB_TOKEN,'Accept':'application/vnd.github+json','Content-Type':'application/json'},
+        body:JSON.stringify({message:'Update leaderboard',content:btoa(JSON.stringify(trimmed,null,2)),sha:file.sha})
+      });
     }).catch(()=>{});
 }
 
@@ -195,12 +199,16 @@ const SAVE_KEY='lilys_farm_save';
 const SAVE_INTERVAL=5; // seconds
 let saveTimer=0;
 
+let lastSaveOk=false;
+let saveFlash=0; // visual indicator
+
 function saveGame(){
   const data={
-    v:2, // version
+    v:2,
     coins, totalEarned, speedLvl, carryLvl, wheatLvl,
     prestigeStars, prestigeLifetimeEarned,
     wheatTileCount:wheat.tiles.length,
+    playerName,
     tiers:activeTiers.map(ts=>({
       idx:ts.tierIdx,
       feedLevel:ts.feedLevel,
@@ -210,7 +218,14 @@ function saveGame(){
       workerStacks:ts.workers.map(w=>w.maxStack),
     })),
   };
-  try{localStorage.setItem(SAVE_KEY,JSON.stringify(data));}catch(e){}
+  const json=JSON.stringify(data);
+  try{
+    localStorage.setItem(SAVE_KEY,json);
+    // Verify it actually saved
+    const check=localStorage.getItem(SAVE_KEY);
+    lastSaveOk=check===json;
+  }catch(e){lastSaveOk=false;}
+  saveFlash=1;
 }
 
 function loadGame(){
@@ -227,6 +242,11 @@ function loadGame(){
     speedLvl=d.speedLvl||0;
     carryLvl=d.carryLvl||0;
     wheatLvl=d.wheatLvl||0;
+    // Restore player name from save if not in localStorage
+    if(d.playerName&&!playerName){
+      playerName=d.playerName;
+      localStorage.setItem('lilys_farm_name',playerName);
+    }
 
     // Rebuild wheat
     initWheat();
@@ -440,6 +460,8 @@ if(!loadGame()){
   activateTier(0);
   markNextTier();
 }
+// Re-check name prompt after load (save might have restored it)
+showNamePrompt=!playerName;
 
 // ═══════════════════════════════════════
 // CUSTOMER DRAWING DATA
@@ -983,6 +1005,14 @@ function drawHUD(){
   G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
   G.font='12px sans-serif';G.fillStyle='#aaa';G.fillText(`Carry: ${lily.carry()}/${lily.maxC()}`,W/2,35);
 
+  // Save indicator
+  if(saveFlash>0){
+    saveFlash-=0.02;
+    G.font='10px sans-serif';G.textAlign='right';
+    G.fillStyle=lastSaveOk?`rgba(76,175,80,${saveFlash})`:`rgba(244,67,54,${saveFlash})`;
+    G.fillText(lastSaveOk?'✓ saved':'✗ save failed',W-14,14);
+  }
+
   // Stack summary
   const counts={};
   lily.stack.forEach(s=>{counts[s.emoji]=(counts[s.emoji]||0)+1;});
@@ -1089,6 +1119,11 @@ if(showNamePrompt){nameOverlay.style.display='flex';setTimeout(()=>nameInEl.focu
 function s2w(sx,sy){
   return{x:(sx-W/2)/camZoom+camX, y:(sy-H/2)/camZoom+camY};
 }
+
+// Save when leaving/switching tabs (critical for mobile)
+document.addEventListener('visibilitychange',()=>{if(document.hidden)saveGame();});
+window.addEventListener('beforeunload',()=>saveGame());
+window.addEventListener('pagehide',()=>saveGame());
 
 // Desktop: cursor follow
 C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;targetY=w.y;});
