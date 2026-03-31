@@ -372,7 +372,7 @@ function activateTier(tierIdx){
   pads.push(mkPad(midX,py+90,'🧑‍🌾','Feeder',200+tierIdx*100,
     (p)=>{
       p.done=true;
-      const w=mkWorker('feeder',ts.feederX+30,ts.feederY+30,state);
+      const w=mkWorker('feeder',state.feederX+30,state.feederY+30,state);
       state.workers.push(w);
       pads.push(mkPad(midX,py+170,'⚡','F.Speed',80,(p2)=>{
         w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
@@ -806,7 +806,7 @@ function update(dt){
         if(drain>0){coins-=drain;pad.paid+=drain;
           if(pad.paid>=pad.cost){
             sfxUnlock();
-            if(typeof pad.action==='function')pad.action(pad);
+            try{if(typeof pad.action==='function')pad.action(pad);}catch(e){console.error('Pad action error:',e);}
             if(!pad.repeatable)pad.done=true;
             floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
           }
