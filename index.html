@@ -1091,12 +1091,13 @@ let prestigeBtnHit=null; // {x,y,w,h} for click detection
 
 function drawHUD(){
   G.fillStyle='rgba(62,39,35,0.88)';G.fillRect(0,0,W,42);
-  G.font='bold 22px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';G.fillText(`🪙 ${coins}`,14,30);
-
-  // Prestige stars
+  G.font='bold 22px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';
+  const coinText=`🪙 ${coins}`;
+  G.fillText(coinText,14,30);
   if(prestigeStars>0){
-    G.font='14px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';
-    G.fillText(`${'⭐'.repeat(Math.min(prestigeStars,10))} x${prestigeBonus().toFixed(2)}`,140,30);
+    const coinW=G.measureText(coinText).width;
+    G.font='bold 13px sans-serif';G.fillStyle='#ce93d8';
+    G.fillText(`x${prestigeBonus().toFixed(2)} ${'⭐'.repeat(Math.min(prestigeStars,5))}`,20+coinW,30);
   }
 
   G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
