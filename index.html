@@ -599,19 +599,20 @@ function updateWorker(w,dt){
   // FEEDER: harvests wheat → delivers to this tier's feeder
   if(w.type==='feeder'){
     if(w.state==='idle'){
-      // Need to feed? Go harvest wheat
       if(ts.feedLevel<ts.feedMax*0.8){
-        const grown=wheat.tiles.find(t=>t.grown);
-        if(grown) w.state='goHarvest';
+        if(wheat.tiles.some(t=>t.grown)) w.state='goHarvest';
         else moveTo(w,w.homeX,w.homeY,dt);
       } else moveTo(w,w.homeX,w.homeY,dt);
     }
     if(w.state==='goHarvest'){
-      const grown=wheat.tiles.find(t=>t.grown);
-      if(grown){
-        if(moveTo(w,grown.x,grown.y,dt)){
+      // Pick nearest grown tile to this worker (not always the first one)
+      let best=null,bestD=Infinity;
+      wheat.tiles.forEach(t=>{if(t.grown){const d=dist(w,t);if(d<bestD){bestD=d;best=t;}}});
+      if(best){
+        if(moveTo(w,best.x,best.y,dt)){
+          // Harvest all grown tiles within reach
           wheat.tiles.forEach(t=>{
-            if(t.grown&&dist(w,t)<35&&w.stack.length<w.maxStack){
+            if(t.grown&&dist(w,t)<45&&w.stack.length<w.maxStack){
               t.grown=false;t.timer=0;
               w.stack.push({type:'wheat',emoji:'🌾'});sfxCollect();
             }
