@@ -689,11 +689,11 @@ const JOY_R=50;
 // GAME UPDATE
 // ═══════════════════════════════════════
 function addCoins(n,x,y){
-  n=Math.floor(n*prestigeBonus()); // prestige multiplier
+  n=Math.floor(n*prestigeBonus());
   coins+=n;totalEarned+=n;
   if(x!==undefined){floats.push({x,y:y-20,text:`+${n}🪙`,t:1,color:'#fdd835'});sfxCoin();}
-  // Check prestige availability
   if(totalEarned>=prestigeCost())showPrestigeBtn=true;
+  saveFlash=1; // will save on next interval, but mark dirty
 }
 let sellCD=0;
 
@@ -833,8 +833,9 @@ function update(dt){
             sfxUnlock();
             try{if(typeof pad.action==='function')pad.action(pad);}catch(e){console.error('Pad action error:',e);}
             if(!pad.repeatable)pad.done=true;
-            else pad.hoverTime=0; // reset warmup for next purchase
+            else pad.hoverTime=0;
             floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
+            saveGame(); // save immediately after purchase
           }
         }
       }
