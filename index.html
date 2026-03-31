@@ -255,7 +255,11 @@ function loadGame(){
       }
       // Recreate workers
       td.workerTypes.forEach((wt,i)=>{
-        const w=mkWorker(wt,wt==='seller'?ts.booth.x:ts.pen.x+ts.pen.w/2,wt==='seller'?ts.booth.y+35:ts.pen.y+ts.pen.h/2,ts);
+        // Map old 'collector' saves to 'feeder'
+        const type=wt==='collector'?'feeder':wt;
+        const hx=type==='seller'?ts.booth.x:ts.feederX+30;
+        const hy=type==='seller'?ts.booth.y+35:ts.feederY+30;
+        const w=mkWorker(type,hx,hy,ts);
         w.speed=td.workerSpeeds[i]||90;
         w.maxStack=td.workerStacks[i]||6;
         ts.workers.push(w);
@@ -352,25 +356,26 @@ function activateTier(tierIdx){
   const px=pen.x, py=pen.y, bx=booth.x, by=booth.y;
   const pads=[];
 
-  // More animals — left of pen
-  pads.push(mkPad(px-90,py+30,cfg.animal,`+1 ${cfg.animalName}`,cfg.animalCost,
+  // More animals — left of pen (avoid paths)
+  const ap=safePadPos(px-90,py+30);
+  pads.push(mkPad(ap.x,ap.y,cfg.animal,`+1 ${cfg.animalName}`,cfg.animalCost,
     (p)=>{
       state.animals.push({x:rnd(pen.x+30,pen.x+pen.w-30),y:rnd(pen.y+30,pen.y+pen.h-60),tx:0,ty:0,timer:0});
       if(state.animals.length>=cfg.maxN)p.done=true;
       else{p.paid=0;p.cost=Math.floor(p.cost*1.4);}
     },true,0,cfg.maxN-cfg.startN));
 
-  // Collector worker — below pen, left side
-  pads.push(mkPad(px,py+pen.h+20,'👷','Collector',200+tierIdx*100,
+  // Feeder worker — harvests wheat and delivers to this tier's feeder
+  pads.push(mkPad(px-90,py+120,'🧑‍🌾','Feeder',200+tierIdx*100,
     (p)=>{
       p.done=true;
-      const w=mkWorker('collector',pen.x+pen.w/2,pen.y+pen.h/2,state);
+      const w=mkWorker('feeder',ts.feederX+30,ts.feederY+30,state);
       state.workers.push(w);
-      // Worker upgrades — below the collector pad
-      pads.push(mkPad(px,py+pen.h+100,'⚡','W.Speed',80,(p2)=>{
+      // Worker upgrades — below feeder pad
+      pads.push(mkPad(px-90,py+200,'⚡','F.Speed',80,(p2)=>{
         w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
       },true,0,5));
-      pads.push(mkPad(px+90,py+pen.h+100,'📦','W.Carry',100,(p2)=>{
+      pads.push(mkPad(px-90,py+270,'📦','F.Carry',100,(p2)=>{
         w.maxStack+=3;p2.paid=0;p2.cost=Math.floor(p2.cost*1.5);
       },true,0,4));
       rebuildPads();
@@ -438,6 +443,40 @@ function markNextTier(){
   allPads.forEach(p=>{if(!globalPads.includes(p)&&!activeTiers.some(s=>s.pads.includes(p)))p._isNextTier=true});
 }
 
+// Path rectangles for collision — pads should not overlap these
+function getPathRects(){
+  const rects=[];
+  const P=30; // path width + margin
+  const hwX=wheat.x+wheat.w+40;
+  if(activeTiers.length>0){
+    const lastTier=activeTiers[activeTiers.length-1];
+    rects.push({x:hwX-P,y:wheat.y,w:P*2,h:lastTier.feederY-wheat.y+50}); // vertical highway
+  }
+  rects.push({x:wheat.x+wheat.w,y:wheat.y+wheat.h/2-P,w:hwX-wheat.x-wheat.w+P,h:P*2}); // wheat to highway
+  activeTiers.forEach(ts=>{
+    rects.push({x:hwX-P,y:ts.feederY-P,w:ts.feederX-hwX+P*2,h:P*2}); // highway to feeder
+    rects.push({x:ts.pen.x+ts.pen.w,y:ts.pen.y+ts.pen.h/2-P,w:ts.booth.x-ts.pen.x-ts.pen.w,h:P*2}); // pen to booth
+  });
+  return rects;
+}
+
+function padOverlapsPath(px,py){
+  const padR=40; // approximate pad radius
+  return getPathRects().some(r=>
+    px+padR>r.x && px<r.x+r.w+padR && py+padR>r.y && py<r.y+r.h+padR
+  );
+}
+
+// Nudge pad position if it overlaps a path
+function safePadPos(x,y){
+  if(!padOverlapsPath(x,y))return{x,y};
+  // Try shifting in 4 directions
+  for(const [dx,dy] of [[0,-80],[0,80],[-80,0],[80,0],[0,-120],[0,120]]){
+    if(!padOverlapsPath(x+dx,y+dy))return{x:x+dx,y:y+dy};
+  }
+  return{x,y}; // give up
+}
+
 // ─── INIT: load save or start fresh ───
 if(!loadGame()){
   rebuildGlobalPads();
@@ -483,9 +522,50 @@ function moveTo(w,x,y,dt){
 function updateWorker(w,dt){
   const ts=w.tierState, pen=ts.pen, booth=ts.booth, cfg=ts.tier;
 
-  if(w.type==='collector'){
+  // FEEDER: harvests wheat → delivers to this tier's feeder
+  if(w.type==='feeder'){
     if(w.state==='idle'){
-      if(ts.products.length>0) w.state='goCollect';
+      // Need to feed? Go harvest wheat
+      if(ts.feedLevel<ts.feedMax*0.8){
+        const grown=wheat.tiles.find(t=>t.grown);
+        if(grown) w.state='goHarvest';
+        else moveTo(w,w.homeX,w.homeY,dt);
+      } else moveTo(w,w.homeX,w.homeY,dt);
+    }
+    if(w.state==='goHarvest'){
+      const grown=wheat.tiles.find(t=>t.grown);
+      if(grown){
+        if(moveTo(w,grown.x,grown.y,dt)){
+          wheat.tiles.forEach(t=>{
+            if(t.grown&&dist(w,t)<35&&w.stack.length<w.maxStack){
+              t.grown=false;t.timer=0;
+              w.stack.push({type:'wheat',emoji:'🌾'});sfxCollect();
+            }
+          });
+        }
+        if(w.stack.length>=w.maxStack||!wheat.tiles.some(t=>t.grown)){
+          if(w.stack.length>0) w.state='goFeed'; else w.state='idle';
+        }
+      } else{
+        if(w.stack.length>0) w.state='goFeed'; else w.state='idle';
+      }
+    }
+    if(w.state==='goFeed'){
+      if(moveTo(w,ts.feederX+30,ts.feederY,dt)){
+        while(w.stack.length>0&&ts.feedLevel<ts.feedMax){
+          w.stack.pop();ts.feedLevel++;
+        }
+        w.stack=[];w.state='idle';
+      }
+    }
+  }
+
+  // SELLER: collects products from pen → sells at booth to customers
+  if(w.type==='seller'){
+    if(w.state==='idle'){
+      const cust=booth.customers.find(c=>c.state==='waiting');
+      if(w.stack.length>0&&cust) w.state='goSell';
+      else if(w.stack.length===0&&ts.products.length>0) w.state='goCollect';
       else moveTo(w,w.homeX,w.homeY,dt);
     }
     if(w.state==='goCollect'){
@@ -503,45 +583,6 @@ function updateWorker(w,dt){
       } else{if(w.stack.length>0)w.state='goSell';else w.state='idle';}
     }
     if(w.state==='goSell'){
-      // Find booth or lily or seller worker to drop off
-      const seller=ts.workers.find(sw=>sw.type==='seller');
-      const target=seller?{x:seller.homeX,y:seller.homeY}:{x:booth.x,y:booth.y+35};
-      if(moveTo(w,target.x,target.y,dt)){
-        if(seller&&dist(w,seller)<50){
-          while(w.stack.length>0&&seller.stack.length<seller.maxStack){
-            seller.stack.push(w.stack.pop());
-          }
-        }
-        // If no seller, drop for lily? Or just sell directly
-        if(!seller){
-          const cust=booth.customers.find(c=>c.state==='waiting');
-          if(cust&&w.stack.length>0){
-            w.sellTimer+=dt;
-            if(w.sellTimer>.25){w.sellTimer=0;
-              const item=w.stack.pop();
-              addCoins(cfg.value,booth.x,booth.y-10);sfxSell();
-              flies.push({x:w.x,y:w.y-20,tx:cust.x,ty:cust.y,emoji:item.emoji,t:0,dur:.3});
-              cust.timer++;if(cust.timer>=2||w.stack.length===0){cust.state='served';cust.happy=.8;}
-            }
-            return;
-          }
-        }
-        w.stack=[];w.state='idle';
-      }
-    }
-  }
-
-  if(w.type==='seller'){
-    if(w.state==='idle'){
-      const cust=booth.customers.find(c=>c.state==='waiting');
-      if(w.stack.length>0&&cust) w.state='selling';
-      else if(w.stack.length===0){
-        // Go collect from pen
-        if(ts.products.length>0) w.state='goCollect';
-        else moveTo(w,w.homeX,w.homeY,dt);
-      } else moveTo(w,w.homeX,w.homeY,dt);
-    }
-    if(w.state==='selling'){
       if(moveTo(w,booth.x,booth.y+35,dt)){
         const cust=booth.customers.find(c=>c.state==='waiting');
         if(cust&&w.stack.length>0){
@@ -554,20 +595,6 @@ function updateWorker(w,dt){
           }
         } else w.state='idle';
       }
-    }
-    if(w.state==='goCollect'){
-      const p=ts.products[0];
-      if(p){
-        if(moveTo(w,p.x,p.y,dt)){
-          for(let i=ts.products.length-1;i>=0;i--){
-            if(dist(w,ts.products[i])<35&&w.stack.length<w.maxStack){
-              w.stack.push({type:cfg.id,emoji:cfg.product});
-              ts.products.splice(i,1);sfxCollect();
-            }
-          }
-        }
-        if(w.stack.length>=w.maxStack-1||(ts.products.length===0&&w.stack.length>0)) w.state='idle';
-      } else w.state='idle';
     }
   }
 }
@@ -745,11 +772,13 @@ function update(dt){
       }
     }
 
-    // Drop off to workers
+    // Drop off to workers — seller takes products, feeder takes wheat
     ts.workers.forEach(w=>{
       if(dist(lily,w)<50&&lily.stack.length>0){
         for(let i=lily.stack.length-1;i>=0;i--){
-          if(lily.stack[i].type===cfg.id&&w.stack.length<w.maxStack){
+          const item=lily.stack[i];
+          const match=w.type==='seller'?item.type===cfg.id:item.type==='wheat';
+          if(match&&w.stack.length<w.maxStack){
             w.stack.push(lily.stack.splice(i,1)[0]);sfxCollect();
           }
         }
@@ -896,12 +925,23 @@ function drawWorld(){
   for(let x=-500;x<2500;x+=40)for(let y=-500;y<2000;y+=40)
     if((x+y)%80===0)G.fillRect(x,y,40,40);
 
-  // Paths
+  // Paths — wheat to each feeder, pen to booth
   G.fillStyle='#a1887f';
-  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-12,100,24);
+  const PATH_W=24;
+  // Main vertical highway from wheat area down
+  const hwX=wheat.x+wheat.w+40;
+  if(activeTiers.length>0){
+    const lastTier=activeTiers[activeTiers.length-1];
+    G.fillRect(hwX-PATH_W/2,wheat.y+wheat.h/2-12,PATH_W,lastTier.feederY-wheat.y-wheat.h/2+30);
+  }
   activeTiers.forEach(ts=>{
-    G.fillRect(ts.pen.x+ts.pen.w,ts.pen.y+ts.pen.h/2-12,ts.booth.x-ts.pen.x-ts.pen.w,24);
+    // Horizontal from highway to feeder
+    G.fillRect(hwX,ts.feederY-PATH_W/2,ts.feederX-hwX,PATH_W);
+    // Horizontal from pen to booth
+    G.fillRect(ts.pen.x+ts.pen.w,ts.pen.y+ts.pen.h/2-PATH_W/2,ts.booth.x-ts.pen.x-ts.pen.w,PATH_W);
   });
+  // Wheat field to highway
+  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-PATH_W/2,hwX-wheat.x-wheat.w+PATH_W/2,PATH_W);
 
   // Wheat field
   drawArea(wheat.x,wheat.y,wheat.w,wheat.h,'#8d6e63','🌾 Wheat Field');
@@ -943,7 +983,7 @@ function drawWorld(){
       drawChar(w.x,w.y,w.dir,w.wf,cols[0],cols[1],cols[2]);
       drawStack(w.x,w.y,w.stack,14);
       G.font='16px serif';G.textAlign='center';
-      G.fillText(w.type==='seller'?'🏪':'📥',w.x,w.y-24-(w.stack.length>0?w.stack.length*10+8:0));
+      G.fillText(w.type==='seller'?'🏪':'🌾',w.x,w.y-24-(w.stack.length>0?w.stack.length*10+8:0));
     });
   });
 
