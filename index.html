@@ -12,6 +12,10 @@ canvas{display:block;width:100vw;height:100vh}
 </head>
 <body>
 <canvas id="c"></canvas>
+<input id="nameIn" type="text" maxlength="15" placeholder="Your name..."
+  style="position:fixed;top:50%;left:50%;transform:translate(-50%,10px);width:220px;height:40px;
+  font-size:18px;text-align:center;border:2px solid #fdd835;background:#3e2723;color:#fff;
+  border-radius:8px;outline:none;display:none;z-index:999;font-family:inherit">
 <script>
 const C=document.getElementById('c'),G=C.getContext('2d');
 let W,H;
@@ -1057,15 +1061,10 @@ function drawNamePrompt(){
   G.font='14px sans-serif';G.fillStyle='#fff';
   G.fillText("What's your name, farmer?",W/2,by+65);
 
-  // Input box
-  const iw=220,ih=36;
-  G.fillStyle='#3e2723';G.fillRect(W/2-iw/2,by+80,iw,ih);
-  G.strokeStyle='#fdd835';G.lineWidth=2;G.strokeRect(W/2-iw/2,by+80,iw,ih);
-
-  nameCursorBlink+=0.05;
-  const cursor=Math.sin(nameCursorBlink*3)>0?'|':'';
-  G.font='18px sans-serif';G.fillStyle='#fff';G.textAlign='center';
-  G.fillText(nameInput+cursor,W/2,by+104);
+  // Input is the real HTML element (positioned over canvas via CSS)
+  // Just draw a label above it
+  G.font='12px sans-serif';G.fillStyle='#aaa';G.textAlign='center';
+  G.fillText('(type below)',W/2,by+78);
 
   // Enter button
   const canSubmit=nameInput.length>=2;
@@ -1078,6 +1077,23 @@ function drawNamePrompt(){
 }
 
 let namePromptBtn=null;
+
+// Real HTML input for mobile keyboard
+const nameInEl=document.getElementById('nameIn');
+nameInEl.addEventListener('input',()=>{nameInput=nameInEl.value;});
+nameInEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&nameInput.length>=2){
+    playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
+    showNamePrompt=false;nameInEl.style.display='none';nameInEl.blur();
+    fetchLeaderboard();pushStats();
+  }
+});
+// Show/hide based on prompt state
+function syncNameInput(){
+  if(showNamePrompt){nameInEl.style.display='block';nameInEl.focus();}
+  else nameInEl.style.display='none';
+}
+if(showNamePrompt)setTimeout(syncNameInput,100);
 
 // ═══════════════════════════════════════
 // INPUT
@@ -1094,7 +1110,7 @@ C.addEventListener('click',e=>{
   if(showNamePrompt&&namePromptBtn){
     if(x>=namePromptBtn.x&&x<=namePromptBtn.x+namePromptBtn.w&&y>=namePromptBtn.y&&y<=namePromptBtn.y+namePromptBtn.h&&nameInput.length>=2){
       playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
-      showNamePrompt=false;fetchLeaderboard();pushStats();
+      showNamePrompt=false;nameInEl.style.display='none';nameInEl.blur();fetchLeaderboard();pushStats();
     }
     return;
   }
@@ -1109,18 +1125,7 @@ C.addEventListener('click',e=>{
   }
 });
 
-// Keyboard: name input
-document.addEventListener('keydown',e=>{
-  if(showNamePrompt){
-    if(e.key==='Backspace')nameInput=nameInput.slice(0,-1);
-    else if(e.key==='Enter'&&nameInput.length>=2){
-      playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
-      showNamePrompt=false;fetchLeaderboard();pushStats();
-    }
-    else if(e.key.length===1&&nameInput.length<15)nameInput+=e.key;
-    e.preventDefault();
-  }
-});
+// Keyboard is handled by the HTML input element — no need for manual keydown
 
 // Mobile: virtual joystick
 C.addEventListener('touchstart',e=>{
