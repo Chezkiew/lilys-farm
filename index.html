@@ -811,19 +811,8 @@ function update(dt){
       }
     }
 
-    // Drop off to workers — seller takes products, feeder takes wheat
-    ts.workers.forEach(w=>{
-      if(dist(lily,w)<50&&lily.stack.length>0){
-        for(let i=lily.stack.length-1;i>=0;i--){
-          const item=lily.stack[i];
-          const match=w.type==='seller'?item.type===cfg.id:item.type==='wheat';
-          if(match&&w.stack.length<w.maxStack){
-            w.stack.push(lily.stack.splice(i,1)[0]);sfxCollect();
-          }
-        }
-      }
-      updateWorker(w,dt);
-    });
+    // Update workers (no auto drop-off from Lily)
+    ts.workers.forEach(w=>updateWorker(w,dt));
   });
 
   // ─── World pads — 1s hover before each charge cycle ───
