@@ -104,6 +104,34 @@ function lilyHat(){return HAT_COLORS[prestigeStars%HAT_COLORS.length];}
 let showPrestigeBtn=false;
 
 // ═══════════════════════════════════════
+// LEADERBOARD
+// ═══════════════════════════════════════
+const LB_URL='https://lilys-farm-leaderboard.chezkiew.workers.dev'; // ← your worker URL
+let playerName=localStorage.getItem('lilys_farm_name')||'';
+let leaderboard=[]; // [{name,prestige,totalEarned,tiersUnlocked,lifetimeEarned,lastSeen}]
+let lbExpanded=false;
+let lbTimer=0;
+const LB_REFRESH=120; // seconds between refreshes
+let showNamePrompt=!playerName;
+let nameInput='';
+let nameCursorBlink=0;
+
+function fetchLeaderboard(){
+  fetch(LB_URL+'/leaderboard').then(r=>r.json()).then(d=>{leaderboard=d||[];}).catch(()=>{});
+}
+
+function pushStats(){
+  if(!playerName)return;
+  const body={name:playerName,prestige:prestigeStars,totalEarned,
+    tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned};
+  fetch(LB_URL+'/update',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)}).catch(()=>{});
+}
+
+// Initial fetch
+if(playerName)setTimeout(fetchLeaderboard,500);
+
+// ═══════════════════════════════════════
 // GAME STATE (resets on prestige)
 // ═══════════════════════════════════════
 let coins=0,totalEarned=0,speedLvl=0,carryLvl=0,wheatLvl=0;
@@ -227,6 +255,7 @@ function doPrestige(){
   markNextTier();
 
   saveGame();
+  pushStats();
   sfxUnlock();
   floats.push({x:lily.x,y:lily.y-40,text:`⭐ Prestige ${prestigeStars}! +25% bonus!`,t:3,color:'#fdd835'});
 }
@@ -706,9 +735,11 @@ function update(dt){
     }
   });
 
-  // ─── Auto-save ───
+  // ─── Auto-save + leaderboard sync ───
   saveTimer+=dt;
   if(saveTimer>=SAVE_INTERVAL){saveTimer=0;saveGame();}
+  lbTimer+=dt;
+  if(lbTimer>=LB_REFRESH){lbTimer=0;fetchLeaderboard();pushStats();}
 
   // ─── Animate ───
   flies.forEach(f=>{f.t+=dt;const p=Math.min(1,f.t/f.dur);f.x=lerp(f.x,f.tx,p*.4);f.y=lerp(f.y,f.ty,p*.4);f.y-=(1-p)*50*dt});
@@ -965,7 +996,76 @@ function drawHUD(){
     G.beginPath();G.arc(kx,ky,20,0,Math.PI*2);G.fill();
     G.globalAlpha=1;
   }
+
+  // ─── Leaderboard (top-right corner) ───
+  if(leaderboard.length>0&&playerName){
+    const lbW=lbExpanded?220:140, lbH=lbExpanded?Math.min(30+leaderboard.length*22,300):80;
+    const lbX=W-lbW-8, lbY=48;
+    G.fillStyle='rgba(62,39,35,0.85)';
+    G.beginPath();G.roundRect(lbX,lbY,lbW,lbH,8);G.fill();
+    G.font='bold 11px sans-serif';G.fillStyle='#ffcc80';G.textAlign='left';
+    G.fillText('🏆 Leaderboard',lbX+8,lbY+16);
+    G.font='9px sans-serif';G.fillStyle='#aaa';G.textAlign='right';
+    G.fillText(lbExpanded?'▲ click':'▼ click',lbX+lbW-8,lbY+16);
+
+    const shown=lbExpanded?leaderboard.slice(0,12):leaderboard.slice(0,3);
+    shown.forEach((p,i)=>{
+      const y=lbY+30+i*(lbExpanded?22:16);
+      const isMe=p.name.toLowerCase()===playerName.toLowerCase();
+      G.font=`${isMe?'bold ':''}${lbExpanded?12:10}px sans-serif`;
+      G.fillStyle=isMe?'#fdd835':'#fff';G.textAlign='left';
+      G.fillText(`${i+1}. ${'⭐'.repeat(Math.min(p.prestige,5))} ${p.name}`,lbX+8,y);
+      if(lbExpanded){
+        G.font='10px sans-serif';G.fillStyle='#aaa';G.textAlign='right';
+        G.fillText(`${p.tiersUnlocked} tiers · ${p.lifetimeEarned||0}🪙`,lbX+lbW-8,y);
+      }
+    });
+    lbHitBox={x:lbX,y:lbY,w:lbW,h:lbH};
+  } else lbHitBox=null;
+
+  // ─── Name prompt overlay ───
+  if(showNamePrompt) drawNamePrompt();
 }
+
+let lbHitBox=null;
+
+function drawNamePrompt(){
+  // Dim overlay
+  G.fillStyle='rgba(0,0,0,0.7)';G.fillRect(0,0,W,H);
+
+  const bw=320,bh=180;
+  const bx=W/2-bw/2,by=H/2-bh/2;
+
+  G.fillStyle='#4e342e';G.beginPath();G.roundRect(bx,by,bw,bh,16);G.fill();
+  G.strokeStyle='#8d6e63';G.lineWidth=3;G.stroke();
+
+  G.font='bold 22px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';
+  G.fillText("🌾 Lily's Farm 🌾",W/2,by+35);
+
+  G.font='14px sans-serif';G.fillStyle='#fff';
+  G.fillText("What's your name, farmer?",W/2,by+65);
+
+  // Input box
+  const iw=220,ih=36;
+  G.fillStyle='#3e2723';G.fillRect(W/2-iw/2,by+80,iw,ih);
+  G.strokeStyle='#fdd835';G.lineWidth=2;G.strokeRect(W/2-iw/2,by+80,iw,ih);
+
+  nameCursorBlink+=0.05;
+  const cursor=Math.sin(nameCursorBlink*3)>0?'|':'';
+  G.font='18px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+  G.fillText(nameInput+cursor,W/2,by+104);
+
+  // Enter button
+  const canSubmit=nameInput.length>=2;
+  G.fillStyle=canSubmit?'#4caf50':'#666';
+  G.beginPath();G.roundRect(W/2-50,by+130,100,34,8);G.fill();
+  G.font='bold 14px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+  G.fillText('START!',W/2,by+152);
+
+  namePromptBtn={x:W/2-50,y:by+130,w:100,h:34};
+}
+
+let namePromptBtn=null;
 
 // ═══════════════════════════════════════
 // INPUT
@@ -975,13 +1075,38 @@ function s2w(sx,sy){return{x:sx+camX,y:sy+camY}}
 // Desktop: cursor follow
 C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;targetY=w.y;});
 
-// Click: prestige button
+// Click: prestige button, leaderboard toggle, name submit
 C.addEventListener('click',e=>{
+  const x=e.clientX,y=e.clientY;
+  // Name prompt
+  if(showNamePrompt&&namePromptBtn){
+    if(x>=namePromptBtn.x&&x<=namePromptBtn.x+namePromptBtn.w&&y>=namePromptBtn.y&&y<=namePromptBtn.y+namePromptBtn.h&&nameInput.length>=2){
+      playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
+      showNamePrompt=false;fetchLeaderboard();pushStats();
+    }
+    return;
+  }
+  // Leaderboard toggle
+  if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
+    lbExpanded=!lbExpanded;return;
+  }
+  // Prestige
   if(prestigeBtnHit){
     const b=prestigeBtnHit;
-    if(e.clientX>=b.x&&e.clientX<=b.x+b.w&&e.clientY>=b.y&&e.clientY<=b.y+b.h){
-      doPrestige();
+    if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h){doPrestige();}
+  }
+});
+
+// Keyboard: name input
+document.addEventListener('keydown',e=>{
+  if(showNamePrompt){
+    if(e.key==='Backspace')nameInput=nameInput.slice(0,-1);
+    else if(e.key==='Enter'&&nameInput.length>=2){
+      playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
+      showNamePrompt=false;fetchLeaderboard();pushStats();
     }
+    else if(e.key.length===1&&nameInput.length<15)nameInput+=e.key;
+    e.preventDefault();
   }
 });
 
@@ -989,16 +1114,27 @@ C.addEventListener('click',e=>{
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
-    // Prestige button
+    const x=t.clientX,y=t.clientY;
+    // Name prompt — show keyboard on mobile
+    if(showNamePrompt){
+      if(namePromptBtn&&x>=namePromptBtn.x&&x<=namePromptBtn.x+namePromptBtn.w&&y>=namePromptBtn.y&&y<=namePromptBtn.y+namePromptBtn.h&&nameInput.length>=2){
+        playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
+        showNamePrompt=false;fetchLeaderboard();pushStats();
+      }
+      return;
+    }
+    // Leaderboard
+    if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
+      lbExpanded=!lbExpanded;return;
+    }
+    // Prestige
     if(prestigeBtnHit){
       const b=prestigeBtnHit;
-      if(t.clientX>=b.x&&t.clientX<=b.x+b.w&&t.clientY>=b.y&&t.clientY<=b.y+b.h){
-        doPrestige();return;
-      }
+      if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h){doPrestige();return;}
     }
     // Joystick
     const jc=getJoyCenter();
-    if(Math.hypot(t.clientX-jc.x,t.clientY-jc.y)<JOY_R*1.8){
+    if(Math.hypot(x-jc.x,y-jc.y)<JOY_R*1.8){
       joyActive=true;joyTouchId=t.identifier;
       joyDx=0;joyDy=0;
     }
@@ -1030,10 +1166,14 @@ C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId
 let lt=0;
 function loop(t){
   const dt=Math.min((t-lt)/1000,.05);lt=t;
-  update(dt);
+  if(!showNamePrompt) update(dt);
   G.clearRect(0,0,W,H);
-  drawWorld();
-  drawHUD();
+  if(!showNamePrompt){drawWorld();drawHUD();}
+  else{
+    // Draw ground behind prompt
+    G.fillStyle='#7cb342';G.fillRect(0,0,W,H);
+    drawNamePrompt();
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
