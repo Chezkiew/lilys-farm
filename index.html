@@ -417,8 +417,11 @@ function activateTier(tierIdx){
 }
 
 function mkPad(x,y,icon,label,cost,action,repeatable,level,maxLevel,size){
-  return {x,y,icon,label,cost,paid:0,done:false,action,
-    repeatable:!!repeatable,level:level||0,maxLevel:maxLevel||99,size:size||40};
+  // Auto-nudge away from paths
+  const safe=safePadPos(x,y);
+  return {x:safe.x,y:safe.y,icon,label,cost,paid:0,done:false,action,
+    repeatable:!!repeatable,level:level||0,maxLevel:maxLevel||99,size:size||40,
+    hoverTime:0}; // must hover 2s before coins drain
 }
 
 function mkWorker(type,hx,hy,tierState){
@@ -790,20 +793,27 @@ function update(dt){
     });
   });
 
-  // ─── World pads ───
+  // ─── World pads — must hover 2s before coins drain ───
+  const HOVER_REQ=2; // seconds
   allPads.forEach(pad=>{
     if(pad.done)return;
     const cx=pad.x+40,cy=pad.y+30;
-    if(dist(lily,{x:cx,y:cy})<50&&coins>0){
-      const drain=Math.min(Math.ceil(pad.cost*dt*2.5),coins,pad.cost-pad.paid);
-      if(drain>0){coins-=drain;pad.paid+=drain;
-        if(pad.paid>=pad.cost){
-          sfxUnlock();
-          if(typeof pad.action==='function')pad.action(pad);
-          if(!pad.repeatable)pad.done=true;
-          floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
+    const onPad=dist(lily,{x:cx,y:cy})<50;
+    if(onPad){
+      pad.hoverTime=(pad.hoverTime||0)+dt;
+      if(pad.hoverTime>=HOVER_REQ&&coins>0){
+        const drain=Math.min(Math.ceil(pad.cost*dt*2.5),coins,pad.cost-pad.paid);
+        if(drain>0){coins-=drain;pad.paid+=drain;
+          if(pad.paid>=pad.cost){
+            sfxUnlock();
+            if(typeof pad.action==='function')pad.action(pad);
+            if(!pad.repeatable)pad.done=true;
+            floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
+          }
         }
       }
+    } else {
+      pad.hoverTime=0; // reset when you walk away
     }
   });
 
@@ -899,13 +909,39 @@ function drawPad(pad){
   const cx=pad.x+40,cy=pad.y+30,r=pad.size/2+8;
   const pct=pad.paid/pad.cost;
   const pulse=.6+Math.sin(Date.now()*.004)*.3;
-  const near=dist(lily,{x:cx,y:cy})<55&&coins>0;
-  if(near){G.beginPath();G.arc(cx,cy,r+12,0,Math.PI*2);G.fillStyle=`rgba(253,216,53,${pulse*.2})`;G.fill();}
+  const near=dist(lily,{x:cx,y:cy})<55;
+  const hovering=(pad.hoverTime||0)>=2;
+
+  // Outer glow when hovering and draining
+  if(near&&hovering&&coins>0){
+    G.beginPath();G.arc(cx,cy,r+12,0,Math.PI*2);
+    G.fillStyle=`rgba(253,216,53,${pulse*.3})`;G.fill();
+  }
+
+  // Dark circle
   G.beginPath();G.arc(cx,cy,r,0,Math.PI*2);G.fillStyle='rgba(0,0,0,0.55)';G.fill();
-  G.beginPath();G.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);G.strokeStyle='#fdd835';G.lineWidth=5;G.lineCap='round';G.stroke();
-  G.beginPath();G.arc(cx,cy,r,-Math.PI/2+Math.PI*2*pct,-Math.PI/2+Math.PI*2);G.strokeStyle='rgba(255,255,255,0.12)';G.lineWidth=5;G.stroke();
+
+  // Coin progress ring (yellow)
+  if(pct>0){
+    G.beginPath();G.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
+    G.strokeStyle='#fdd835';G.lineWidth=5;G.lineCap='round';G.stroke();
+  }
+  // Unfilled ring
+  G.beginPath();G.arc(cx,cy,r,-Math.PI/2+Math.PI*2*pct,-Math.PI/2+Math.PI*2);
+  G.strokeStyle='rgba(255,255,255,0.12)';G.lineWidth=5;G.stroke();
+
+  // Hover warmup ring (white, shows 0-2s progress before coins drain)
+  if(near&&!hovering&&(pad.hoverTime||0)>0){
+    const warmPct=(pad.hoverTime||0)/2;
+    G.beginPath();G.arc(cx,cy,r+4,-Math.PI/2,-Math.PI/2+Math.PI*2*warmPct);
+    G.strokeStyle='rgba(255,255,255,0.5)';G.lineWidth=3;G.lineCap='round';G.stroke();
+  }
+
+  // Icon
   G.font=`${pad.size}px serif`;G.textAlign='center';G.textBaseline='middle';
   G.globalAlpha=.35+pct*.65;G.fillText(pad.icon,cx,cy-1);G.globalAlpha=1;
+
+  // Label
   G.font='bold 10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
   G.fillText(pad.label+(pad.level>0?` ${pad.level}`:''),cx,cy+r+12);
   const rem=pad.cost-Math.floor(pad.paid);
