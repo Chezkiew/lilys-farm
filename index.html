@@ -161,7 +161,11 @@ if(playerName)setTimeout(fetchLeaderboard,500);
 // GAME STATE (resets on prestige)
 // ═══════════════════════════════════════
 let coins=0,totalEarned=0,speedLvl=0,carryLvl=0,wheatLvl=0;
+const isTouchDevice='ontouchstart' in window;
 let camX=0,camY=0,targetX=350,targetY=250;
+let camZoom=isTouchDevice?0.7:1; // mobile starts zoomed out
+const CAM_ZOOM_MIN=0.35,CAM_ZOOM_MAX=1.2;
+let pinchDist=0;
 let floats=[],flies=[];
 
 // Player
@@ -600,7 +604,7 @@ function getWorldBounds(){
 // ═══════════════════════════════════════
 // MOBILE DETECTION + JOYSTICK
 // ═══════════════════════════════════════
-const isMobile='ontouchstart' in window;
+const isMobile=isTouchDevice;
 let joyActive=false,joyDx=0,joyDy=0,joyTouchId=-1;
 const JOY_R=50; // joystick radius
 
@@ -640,7 +644,7 @@ function update(dt){
   const bounds=getWorldBounds();
   lily.x=clamp(lily.x,bounds.x1-40,bounds.x2+40);
   lily.y=clamp(lily.y,bounds.y1-40,bounds.y2+40);
-  camX=lerp(camX,lily.x-W/2,dt*5);camY=lerp(camY,lily.y-H/2,dt*5);
+  camX=lerp(camX,lily.x-W/(2*camZoom),dt*5);camY=lerp(camY,lily.y-H/(2*camZoom),dt*5);
 
   // ─── Wheat harvest ───
   const regrow=wheat.regrow/(1+wheatLvl*.5);
@@ -871,7 +875,10 @@ function drawPad(pad){
 }
 
 function drawWorld(){
-  G.save();G.translate(-camX,-camY);
+  G.save();
+  G.translate(W/2,H/2);
+  G.scale(camZoom,camZoom);
+  G.translate(-W/2-camX,-H/2-camY);
 
   // Ground
   G.fillStyle='#7cb342';G.fillRect(-500,-500,3000,2500);
@@ -1078,7 +1085,9 @@ if(showNamePrompt){nameOverlay.style.display='flex';setTimeout(()=>nameInEl.focu
 // ═══════════════════════════════════════
 // INPUT
 // ═══════════════════════════════════════
-function s2w(sx,sy){return{x:sx+camX,y:sy+camY}}
+function s2w(sx,sy){
+  return{x:(sx-W/2)/camZoom+W/2+camX, y:(sy-H/2)/camZoom+H/2+camY};
+}
 
 // Desktop: cursor follow
 C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;targetY=w.y;});
@@ -1142,6 +1151,30 @@ C.addEventListener('touchend',e=>{
   }
 });
 C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;});
+
+// Pinch to zoom
+C.addEventListener('touchstart',e=>{
+  if(e.touches.length===2){
+    const t1=e.touches[0],t2=e.touches[1];
+    pinchDist=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
+  }
+},{passive:true});
+C.addEventListener('touchmove',e=>{
+  if(e.touches.length===2){
+    const t1=e.touches[0],t2=e.touches[1];
+    const d=Math.hypot(t1.clientX-t2.clientX,t1.clientY-t2.clientY);
+    if(pinchDist>0){
+      camZoom=clamp(camZoom*(d/pinchDist),CAM_ZOOM_MIN,CAM_ZOOM_MAX);
+      pinchDist=d;
+    }
+  }
+},{passive:true});
+
+// Scroll wheel zoom (desktop)
+C.addEventListener('wheel',e=>{
+  e.preventDefault();
+  camZoom=clamp(camZoom*(e.deltaY>0?0.92:1.08),CAM_ZOOM_MIN,CAM_ZOOM_MAX);
+},{passive:false});
 
 // ═══════════════════════════════════════
 // LOOP
