@@ -1079,31 +1079,36 @@ function drawWorld(){
       G.fillStyle='#8bc34a';G.fillRect(t.x-10,t.y+15,20*p,3);}
   });
 
-  // Tier areas
+  // === LAYER 1: Backgrounds (pens, feeders, booths) ===
   activeTiers.forEach(ts=>{
     const cfg=ts.tier,pen=ts.pen;
     const penColors=['#a5d6a7','#c8e6c9','#ffe0b2','#d1c4e9','#fff9c4'];
     drawArea(pen.x,pen.y,pen.w,pen.h,penColors[ts.tierIdx%5],`${cfg.animal} ${cfg.name}`);
     drawFeeder(ts.feederX,ts.feederY,ts.feedLevel,ts.feedMax);
-
-    G.font=`${cfg.id==='bee'?22:28}px serif`;G.textAlign='center';G.textBaseline='middle';
-    ts.animals.forEach(a=>{const b=Math.sin(Date.now()*.006+a.x)*2;G.fillText(cfg.animal,a.x,a.y+b);});
-
-    G.font='20px serif';
-    ts.products.forEach(p=>{const b=Math.sin(Date.now()*.005+p.x+p.y);G.fillText(cfg.product,p.x,p.y+b);});
-
-    // Booth
+    // Booth structure
     const bth=ts.booth;
     G.fillStyle='#795548';G.fillRect(bth.x-25,bth.y-20,50,60);
     G.fillStyle='#ffab40';G.fillRect(bth.x-22,bth.y-17,44,24);
     G.font='20px serif';G.textAlign='center';G.textBaseline='middle';
     G.fillText(cfg.product,bth.x,bth.y-5);
     G.font='9px sans-serif';G.fillStyle='#fff';G.fillText(cfg.prodName+' Shop',bth.x,bth.y+30);
+  });
 
-    // Customers (drawn as characters)
-    bth.customers.forEach(cu=>drawCustomer(cu));
+  // === LAYER 2: Pads ===
+  allPads.forEach(drawPad);
 
-    // Workers
+  // === LAYER 3: Animals, products, items on ground ===
+  activeTiers.forEach(ts=>{
+    const cfg=ts.tier;
+    G.font=`${cfg.id==='bee'?22:28}px serif`;G.textAlign='center';G.textBaseline='middle';
+    ts.animals.forEach(a=>{const b=Math.sin(Date.now()*.006+a.x)*2;G.fillText(cfg.animal,a.x,a.y+b);});
+    G.font='20px serif';
+    ts.products.forEach(p=>{const b=Math.sin(Date.now()*.005+p.x+p.y);G.fillText(cfg.product,p.x,p.y+b);});
+  });
+
+  // === LAYER 4: All characters (customers, workers, Lily) — always on top ===
+  activeTiers.forEach(ts=>{
+    ts.booth.customers.forEach(cu=>drawCustomer(cu));
     ts.workers.forEach(w=>{
       const cols=w.type==='seller'?['#1565c0','#f44336','#3e2723']:['#2e7d32','#795548','#5d4037'];
       drawChar(w.x,w.y,w.dir,w.wf,cols[0],cols[1],cols[2]);
@@ -1113,10 +1118,7 @@ function drawWorld(){
     });
   });
 
-  // All pads
-  allPads.forEach(drawPad);
-
-  // Lily — hat color changes with prestige
+  // Lily — always on top of everything
   drawChar(lily.x,lily.y,lily.dir,lily.wf,'#e91e63',lilyHat(),'#5d4037');
   drawStack(lily.x,lily.y,lily.stack);
 
@@ -1157,16 +1159,17 @@ function drawHUD(){
   G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
   G.font='12px sans-serif';G.fillStyle='#aaa';G.fillText(`Carry: ${lily.carry()}/${lily.maxC()}`,W/2,35);
 
-  // Prestige button in top bar
+  // Prestige button in top bar — compact, right of title
+  prestigeBtnHit=null;
   if(showPrestigeBtn){
-    const bw=140,bh=28;
-    const bx=W/2+80,by=7;
+    const bw=90,bh=22;
+    const bx=W/2+60,by=10;
     const pulse=.7+Math.sin(Date.now()*.005)*.3;
     G.fillStyle=`rgba(156,39,176,${pulse})`;
-    G.beginPath();G.roundRect(bx,by,bw,bh,6);G.fill();
-    G.strokeStyle='#e1bee7';G.lineWidth=1.5;G.stroke();
-    G.font='bold 12px sans-serif';G.fillStyle='#fff';G.textAlign='center';
-    G.fillText(`⭐ Prestige ${prestigeStars+1}`,bx+bw/2,by+18);
+    G.beginPath();G.roundRect(bx,by,bw,bh,5);G.fill();
+    G.strokeStyle='#e1bee7';G.lineWidth=1;G.stroke();
+    G.font='bold 10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+    G.fillText(`⭐ Prestige`,bx+bw/2,by+15);
     prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
   }
 
@@ -1199,8 +1202,7 @@ function drawHUD(){
     G.globalAlpha=1;
   }
 
-  // Prestige button — no longer drawn here, moved to top bar
-  prestigeBtnHit=null;
+  // Prestige button is in the top bar (drawHUD)
 
   // Mobile joystick — only visible when active
   if(isMobile&&joyActive){
