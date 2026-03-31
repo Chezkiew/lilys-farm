@@ -625,9 +625,9 @@ let sellCD=0;
 function update(dt){
   // ─── Lily movement ───
   let mx=0,my=0;
-  if(isMobile&&joyActive){
-    // Mobile: joystick controls
-    mx=joyDx;my=joyDy;
+  if(isMobile){
+    // Mobile: only move when joystick is active
+    if(joyActive){mx=joyDx;my=joyDy;}
   } else {
     // Desktop: follow cursor
     const ddx=targetX-lily.x,ddy=targetY-lily.y,dd=Math.hypot(ddx,ddy);
