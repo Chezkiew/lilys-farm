@@ -244,6 +244,7 @@ function loadGame(){
 
     // Rebuild tiers
     activeTiers=[];allPads=[];
+    placedPadPositions.length=0;
     rebuildGlobalPads();
     d.tiers.forEach(td=>{
       activateTier(td.idx);
@@ -289,6 +290,7 @@ function doPrestige(){
   // Reset tiers and pads
   activeTiers=[];
   allPads=[];
+  placedPadPositions.length=0;
   rebuildGlobalPads();
   activateTier(0);
   markNextTier();
@@ -473,14 +475,34 @@ function padOverlapsPath(px,py){
   );
 }
 
-// Nudge pad position if it overlaps a path
+// Track all placed pad positions for overlap detection
+const placedPadPositions=[];
+
+function padOverlapsPad(x,y){
+  const PAD_SIZE=80; // approximate pad footprint
+  return placedPadPositions.some(p=>
+    Math.abs(x-p.x)<PAD_SIZE && Math.abs(y-p.y)<PAD_SIZE
+  );
+}
+
+// Nudge pad position if it overlaps a path or another pad
 function safePadPos(x,y){
-  if(!padOverlapsPath(x,y))return{x,y};
-  // Try shifting in 4 directions
-  for(const [dx,dy] of [[0,-80],[0,80],[-80,0],[80,0],[0,-120],[0,120]]){
-    if(!padOverlapsPath(x+dx,y+dy))return{x:x+dx,y:y+dy};
+  if(!padOverlapsPath(x,y)&&!padOverlapsPad(x,y)){
+    placedPadPositions.push({x,y});
+    return{x,y};
   }
-  return{x,y}; // give up
+  // Spiral outward to find a free spot
+  for(let dist=80;dist<=400;dist+=80){
+    for(const [dx,dy] of [[0,-dist],[dist,0],[0,dist],[-dist,0],
+        [dist,-dist],[-dist,-dist],[dist,dist],[-dist,dist]]){
+      if(!padOverlapsPath(x+dx,y+dy)&&!padOverlapsPad(x+dx,y+dy)){
+        placedPadPositions.push({x:x+dx,y:y+dy});
+        return{x:x+dx,y:y+dy};
+      }
+    }
+  }
+  placedPadPositions.push({x,y});
+  return{x,y};
 }
 
 // ─── INIT: load save or start fresh ───
