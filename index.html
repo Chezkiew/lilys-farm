@@ -443,13 +443,11 @@ function mkWorker(type,hx,hy,tierState){
 }
 
 function rebuildPads(){
-  // Global pads + all tier pads
   const gp=[];
-  // Lily upgrades (placed near wheat field)
   gp.push(...globalPads);
   activeTiers.forEach(s=>gp.push(...s.pads));
-  // Next tier pads already in allPads
   allPads=gp.concat(allPads.filter(p=>p._isNextTier));
+  revalidateAllPads();
 }
 
 // Global upgrade pads (rebuilt dynamically)
@@ -466,14 +464,21 @@ const HW_X=380;
 function getPathRects(){
   const rects=[];
   const P=30;
+  const wheatMidY=wheat.y+wheat.h/2;
+
   if(activeTiers.length>0){
-    const lastTier=activeTiers[activeTiers.length-1];
-    rects.push({x:HW_X-P,y:wheat.y,w:P*2,h:lastTier.feederY-wheat.y+50}); // vertical highway
+    // Vertical highway full extent
+    let topY=wheatMidY, botY=wheatMidY;
+    activeTiers.forEach(ts=>{topY=Math.min(topY,ts.feederY);botY=Math.max(botY,ts.feederY);});
+    rects.push({x:HW_X-P,y:topY-P,w:P*2,h:botY-topY+P*3});
   }
-  rects.push({x:wheat.x+wheat.w,y:wheat.y+wheat.h/2-P,w:HW_X-wheat.x-wheat.w+P,h:P*2}); // wheat to highway
+  // Wheat to highway
+  rects.push({x:wheat.x+wheat.w-10,y:wheatMidY-P,w:HW_X-wheat.x-wheat.w+P+10,h:P*2});
+  // Per-tier paths
   activeTiers.forEach(ts=>{
     rects.push({x:HW_X-P,y:ts.feederY-P,w:ts.feederX-HW_X+P*2,h:P*2}); // highway to feeder
-    rects.push({x:ts.pen.x+ts.pen.w,y:ts.pen.y+ts.pen.h/2-P,w:ts.booth.x-ts.pen.x-ts.pen.w,h:P*2}); // pen to booth
+    const pathY=ts.pen.y+ts.pen.h/2;
+    rects.push({x:ts.pen.x+ts.pen.w-10,y:pathY-P,w:ts.booth.x-ts.pen.x-ts.pen.w+20,h:P*2}); // pen to booth
   });
   return rects;
 }
@@ -497,33 +502,53 @@ function padOverlapsPath(px,py){
 }
 
 // Track all placed pad positions for overlap detection
-const placedPadPositions=[];
+let placedPadPositions=[];
 
-function padOverlapsPad(x,y){
-  const PAD_SIZE=80; // approximate pad footprint
+function padOverlapsPad(x,y,ignorePad){
+  const PAD_SIZE=80;
   return placedPadPositions.some(p=>
-    Math.abs(x-p.x)<PAD_SIZE && Math.abs(y-p.y)<PAD_SIZE
+    p!==ignorePad && Math.abs(x-p.x)<PAD_SIZE && Math.abs(y-p.y)<PAD_SIZE
   );
 }
 
-// Nudge pad position if it overlaps a path or another pad
-function safePadPos(x,y){
-  if(!padOverlapsPath(x,y)&&!padOverlapsPad(x,y)){
-    placedPadPositions.push({x,y});
-    return{x,y};
-  }
-  // Spiral outward to find a free spot
-  for(let dist=80;dist<=400;dist+=80){
+// Find a free spot starting from (x,y), spiraling outward
+function findFreeSpot(x,y,ignorePad){
+  if(!padOverlapsPath(x,y)&&!padOverlapsPad(x,y,ignorePad)) return{x,y};
+  for(let dist=80;dist<=600;dist+=70){
     for(const [dx,dy] of [[0,-dist],[dist,0],[0,dist],[-dist,0],
-        [dist,-dist],[-dist,-dist],[dist,dist],[-dist,dist]]){
-      if(!padOverlapsPath(x+dx,y+dy)&&!padOverlapsPad(x+dx,y+dy)){
-        placedPadPositions.push({x:x+dx,y:y+dy});
-        return{x:x+dx,y:y+dy};
-      }
+        [dist,-dist],[-dist,-dist],[dist,dist],[-dist,dist],
+        [dist/2,-dist],[dist,dist/2],[-dist/2,dist],[-dist,-dist/2]]){
+      const nx=x+dx,ny=y+dy;
+      if(!padOverlapsPath(nx,ny)&&!padOverlapsPad(nx,ny,ignorePad)) return{x:nx,y:ny};
     }
   }
-  placedPadPositions.push({x,y});
   return{x,y};
+}
+
+// Place a new pad at a safe position
+function safePadPos(x,y){
+  const pos=findFreeSpot(x,y);
+  placedPadPositions.push({x:pos.x,y:pos.y});
+  return pos;
+}
+
+// Revalidate ALL pads — move any that now overlap new pens/paths/zones
+function revalidateAllPads(){
+  placedPadPositions=[];
+  allPads.forEach(pad=>{
+    if(pad.done)return;
+    // Check if current position is still valid
+    if(padOverlapsPath(pad.x,pad.y)){
+      const pos=findFreeSpot(pad.x,pad.y);
+      pad.x=pos.x;pad.y=pos.y;
+    }
+    // Check overlap with other placed pads
+    if(padOverlapsPad(pad.x,pad.y)){
+      const pos=findFreeSpot(pad.x,pad.y);
+      pad.x=pos.x;pad.y=pos.y;
+    }
+    placedPadPositions.push({x:pad.x,y:pad.y});
+  });
 }
 
 // ─── INIT: load save or start fresh ───
@@ -998,22 +1023,44 @@ function drawWorld(){
   for(let x=-500;x<2500;x+=40)for(let y=-500;y<2000;y+=40)
     if((x+y)%80===0)G.fillRect(x,y,40,40);
 
-  // Paths — wheat to each feeder, pen to booth
+  // Paths — fully connected: wheat → highway → each feeder, pen → booth
   G.fillStyle='#a1887f';
   const PATH_W=24;
+  const wheatMidY=wheat.y+wheat.h/2;
+
   if(activeTiers.length>0){
-    const lastTier=activeTiers[activeTiers.length-1];
-    // Vertical highway
-    G.fillRect(HW_X-PATH_W/2,wheat.y+wheat.h/2,PATH_W,lastTier.feederY-wheat.y-wheat.h/2+30);
+    // Find full vertical extent
+    let topY=wheatMidY;
+    let botY=wheatMidY;
+    activeTiers.forEach(ts=>{
+      topY=Math.min(topY,ts.feederY);
+      botY=Math.max(botY,ts.feederY);
+    });
+    // Vertical highway — covers from wheat down to lowest feeder
+    G.fillRect(HW_X-PATH_W/2,topY-PATH_W/2,PATH_W,botY-topY+PATH_W+30);
   }
+
+  // Wheat field to highway (horizontal)
+  G.fillRect(wheat.x+wheat.w,wheatMidY-PATH_W/2,HW_X-wheat.x-wheat.w+PATH_W/2,PATH_W);
+
+  // Connect highway to wheat at the right Y
+  if(activeTiers.length>0){
+    const firstFeederY=activeTiers[0].feederY;
+    if(Math.abs(firstFeederY-wheatMidY)>PATH_W){
+      // Vertical stub from wheat junction to first feeder level
+      const y1=Math.min(wheatMidY,firstFeederY);
+      const y2=Math.max(wheatMidY,firstFeederY);
+      G.fillRect(HW_X-PATH_W/2,y1,PATH_W,y2-y1+PATH_W);
+    }
+  }
+
   activeTiers.forEach(ts=>{
     // Horizontal: highway to feeder
-    G.fillRect(HW_X,ts.feederY-PATH_W/2,ts.feederX-HW_X,PATH_W);
+    G.fillRect(HW_X-PATH_W/2,ts.feederY-PATH_W/2,ts.feederX-HW_X+PATH_W,PATH_W);
     // Horizontal: pen to booth
-    G.fillRect(ts.pen.x+ts.pen.w,ts.pen.y+ts.pen.h/2-PATH_W/2,ts.booth.x-ts.pen.x-ts.pen.w,PATH_W);
+    const pathY=ts.pen.y+ts.pen.h/2;
+    G.fillRect(ts.pen.x+ts.pen.w,pathY-PATH_W/2,ts.booth.x-ts.pen.x-ts.pen.w,PATH_W);
   });
-  // Wheat field to highway
-  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-PATH_W/2,HW_X-wheat.x-wheat.w,PATH_W);
 
   // Wheat field
   drawArea(wheat.x,wheat.y,wheat.w,wheat.h,'#8d6e63','🌾 Wheat Field');
