@@ -106,26 +106,38 @@ let showPrestigeBtn=false;
 // ═══════════════════════════════════════
 // LEADERBOARD
 // ═══════════════════════════════════════
-const LB_URL='https://lilys-farm-leaderboard.chezkiew.workers.dev'; // ← your worker URL
+const LB_BLOB='https://jsonblob.com/api/jsonBlob/019d4224-a990-7cca-8fab-0290bf74637b';
 let playerName=localStorage.getItem('lilys_farm_name')||'';
-let leaderboard=[]; // [{name,prestige,totalEarned,tiersUnlocked,lifetimeEarned,lastSeen}]
+let leaderboard=[];
 let lbExpanded=false;
 let lbTimer=0;
-const LB_REFRESH=120; // seconds between refreshes
+const LB_REFRESH=120;
 let showNamePrompt=!playerName;
 let nameInput='';
 let nameCursorBlink=0;
 
 function fetchLeaderboard(){
-  fetch(LB_URL+'/leaderboard').then(r=>r.json()).then(d=>{leaderboard=d||[];}).catch(()=>{});
+  fetch(LB_BLOB,{headers:{'Content-Type':'application/json'}})
+    .then(r=>r.json()).then(d=>{leaderboard=Array.isArray(d)?d:[];}).catch(()=>{});
 }
 
 function pushStats(){
   if(!playerName)return;
-  const body={name:playerName,prestige:prestigeStars,totalEarned,
-    tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned};
-  fetch(LB_URL+'/update',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)}).catch(()=>{});
+  // Fetch current board, update our entry, push back
+  fetch(LB_BLOB,{headers:{'Content-Type':'application/json'}})
+    .then(r=>r.json()).then(board=>{
+      if(!Array.isArray(board))board=[];
+      const entry={name:playerName.slice(0,20),prestige:prestigeStars,totalEarned,
+        tiersUnlocked:activeTiers.length,lifetimeEarned:prestigeLifetimeEarned+totalEarned,
+        lastSeen:Date.now()};
+      const idx=board.findIndex(p=>p.name.toLowerCase()===playerName.toLowerCase());
+      if(idx>=0)board[idx]=entry;else board.push(entry);
+      board.sort((a,b)=>b.prestige-a.prestige||b.lifetimeEarned-a.lifetimeEarned);
+      const trimmed=board.slice(0,50);
+      leaderboard=trimmed;
+      return fetch(LB_BLOB,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(trimmed)});
+    }).catch(()=>{});
 }
 
 // Initial fetch
