@@ -646,7 +646,8 @@ function update(dt){
   const bounds=getWorldBounds();
   lily.x=clamp(lily.x,bounds.x1-40,bounds.x2+40);
   lily.y=clamp(lily.y,bounds.y1-40,bounds.y2+40);
-  camX=lerp(camX,lily.x-W/(2*camZoom),dt*5);camY=lerp(camY,lily.y-H/(2*camZoom),dt*5);
+  // Camera centers on Lily — zoom is applied in drawWorld, so cam is just world position
+  camX=lerp(camX,lily.x,dt*5);camY=lerp(camY,lily.y,dt*5);
 
   // ─── Wheat harvest ───
   const regrow=wheat.regrow/(1+wheatLvl*.5);
@@ -880,7 +881,7 @@ function drawWorld(){
   G.save();
   G.translate(W/2,H/2);
   G.scale(camZoom,camZoom);
-  G.translate(-W/2-camX,-H/2-camY);
+  G.translate(-camX,-camY);
 
   // Ground
   G.fillStyle='#7cb342';G.fillRect(-500,-500,3000,2500);
@@ -1086,7 +1087,7 @@ if(showNamePrompt){nameOverlay.style.display='flex';setTimeout(()=>nameInEl.focu
 // INPUT
 // ═══════════════════════════════════════
 function s2w(sx,sy){
-  return{x:(sx-W/2)/camZoom+W/2+camX, y:(sy-H/2)/camZoom+H/2+camY};
+  return{x:(sx-W/2)/camZoom+camX, y:(sy-H/2)/camZoom+camY};
 }
 
 // Desktop: cursor follow
