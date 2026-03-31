@@ -469,8 +469,19 @@ function getPathRects(){
 }
 
 function padOverlapsPath(px,py){
-  const padR=40; // approximate pad radius
-  return getPathRects().some(r=>
+  const padR=40;
+  // Check paths
+  if(getPathRects().some(r=>
+    px+padR>r.x && px<r.x+r.w+padR && py+padR>r.y && py<r.y+r.h+padR
+  )) return true;
+  // Check pens, booths, feeders, wheat field
+  const zones=[{x:wheat.x-10,y:wheat.y-10,w:wheat.w+20,h:wheat.h+20}];
+  activeTiers.forEach(ts=>{
+    zones.push({x:ts.pen.x-10,y:ts.pen.y-10,w:ts.pen.w+20,h:ts.pen.h+20}); // pen
+    zones.push({x:ts.booth.x-35,y:ts.booth.y-30,w:70,h:80}); // booth
+    zones.push({x:ts.feederX-10,y:ts.feederY-20,w:80,h:50}); // feeder
+  });
+  return zones.some(r=>
     px+padR>r.x && px<r.x+r.w+padR && py+padR>r.y && py<r.y+r.h+padR
   );
 }
@@ -1091,6 +1102,19 @@ function drawHUD(){
   G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
   G.font='12px sans-serif';G.fillStyle='#aaa';G.fillText(`Carry: ${lily.carry()}/${lily.maxC()}`,W/2,35);
 
+  // Prestige button in top bar
+  if(showPrestigeBtn){
+    const bw=140,bh=28;
+    const bx=W/2+80,by=7;
+    const pulse=.7+Math.sin(Date.now()*.005)*.3;
+    G.fillStyle=`rgba(156,39,176,${pulse})`;
+    G.beginPath();G.roundRect(bx,by,bw,bh,6);G.fill();
+    G.strokeStyle='#e1bee7';G.lineWidth=1.5;G.stroke();
+    G.font='bold 12px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+    G.fillText(`⭐ Prestige ${prestigeStars+1}`,bx+bw/2,by+18);
+    prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
+  }
+
   // Save indicator
   if(saveFlash>0){
     saveFlash-=0.02;
@@ -1120,23 +1144,8 @@ function drawHUD(){
     G.globalAlpha=1;
   }
 
-  // Prestige button
+  // Prestige button — no longer drawn here, moved to top bar
   prestigeBtnHit=null;
-  if(showPrestigeBtn){
-    const bw=200,bh=44;
-    const bx=W/2-bw/2,by=H-bh-16;
-    const pulse=.8+Math.sin(Date.now()*.005)*.2;
-    G.fillStyle=`rgba(156,39,176,${pulse})`;
-    G.beginPath();
-    G.roundRect(bx,by,bw,bh,12);
-    G.fill();
-    G.strokeStyle='#e1bee7';G.lineWidth=2;G.stroke();
-    G.font='bold 16px sans-serif';G.fillStyle='#fff';G.textAlign='center';
-    G.fillText(`⭐ Prestige (${prestigeStars}→${prestigeStars+1})`,bx+bw/2,by+18);
-    G.font='11px sans-serif';G.fillStyle='#e1bee7';
-    G.fillText(`Reset farm for +25% bonus forever`,bx+bw/2,by+34);
-    prestigeBtnHit={x:bx,y:by,w:bw,h:bh};
-  }
 
   // Mobile joystick — only visible when active
   if(isMobile&&joyActive){
