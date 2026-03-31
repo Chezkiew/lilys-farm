@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lily's Farm</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#222;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const C=document.getElementById('c'),G=C.getContext('2d');
+let W,H;
+function resize(){const d=devicePixelRatio||1;W=innerWidth;H=innerHeight;C.width=W*d;C.height=H*d;G.setTransform(d,0,0,d,0,0)}
+resize();addEventListener('resize',resize);
+
+// ═══════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const lerp=(a,b,t)=>a+(b-a)*Math.min(1,t);
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const rndInt=(a,b)=>Math.floor(rnd(a,b+1));
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+const pick=a=>a[rndInt(0,a.length-1)];
+
+// ═══════════════════════════════════════
+// AUDIO
+// ═══════════════════════════════════════
+let actx;
+const au=()=>{if(!actx)actx=new(AudioContext||webkitAudioContext)();return actx};
+function sfx(freq,freq2,dur,type='sine',vol=.15){
+  const c=au(),t=c.currentTime,o=c.createOscillator(),g=c.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,t);o.frequency.exponentialRampToValueAtTime(freq2,t+dur);
+  g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+  o.connect(g).connect(c.destination);o.start(t);o.stop(t+dur);
+}
+const sfxCollect=()=>sfx(600+Math.random()*400,1200,.1);
+const sfxSell=()=>sfx(800,1600,.12,'triangle',.2);
+const sfxCoin=()=>{sfx(1400,1400,.15);sfx(1800,1800,.15,'sine',.08)};
+const sfxUnlock=()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>sfx(f,f,.3,'triangle',.12),i*100))};
+
+// ═══════════════════════════════════════
+// TIER CONFIG — the entire game tree
+// ═══════════════════════════════════════
+const TIERS=[
+  {id:'chicken',name:'Chicken Coop',animal:'🐔',animalName:'Chicken',
+   product:'🥚',prodName:'Egg',value:8,unlockCost:0,
+   startN:2,maxN:8,animalCost:60,feedMax:10,feedDrain:.8,
+   prodInterval:1.8,maxProd:25,custInterval:3,custPatience:15,
+   animalSpeed:25,penW:220,penH:200},
+  {id:'cow',name:'Cow Pasture',animal:'🐄',animalName:'Cow',
+   product:'🥛',prodName:'Milk',value:25,unlockCost:300,
+   startN:2,maxN:6,animalCost:150,feedMax:15,feedDrain:.5,
+   prodInterval:3.5,maxProd:15,custInterval:4,custPatience:12,
+   animalSpeed:15,penW:240,penH:200},
+  {id:'pig',name:'Pig Pen',animal:'🐷',animalName:'Pig',
+   product:'🥓',prodName:'Bacon',value:45,unlockCost:1000,
+   startN:2,maxN:5,animalCost:300,feedMax:20,feedDrain:.4,
+   prodInterval:4,maxProd:12,custInterval:5,custPatience:10,
+   animalSpeed:20,penW:240,penH:200},
+  {id:'sheep',name:'Sheep Farm',animal:'🐑',animalName:'Sheep',
+   product:'🧶',prodName:'Wool',value:70,unlockCost:3000,
+   startN:2,maxN:5,animalCost:500,feedMax:25,feedDrain:.3,
+   prodInterval:5,maxProd:10,custInterval:6,custPatience:10,
+   animalSpeed:18,penW:240,penH:200},
+  {id:'bee',name:'Bee Hive',animal:'🐝',animalName:'Bee',
+   product:'🍯',prodName:'Honey',value:120,unlockCost:8000,
+   startN:3,maxN:10,animalCost:400,feedMax:30,feedDrain:.25,
+   prodInterval:6,maxProd:8,custInterval:7,custPatience:8,
+   animalSpeed:35,penW:200,penH:180},
+];
+
+// ═══════════════════════════════════════
+// GAME STATE
+// ═══════════════════════════════════════
+let coins=0,totalEarned=0,speedLvl=0,carryLvl=0,wheatLvl=0;
+let camX=0,camY=0,targetX=350,targetY=250;
+let floats=[],flies=[];
+
+// Player
+const lily={x:350,y:250,dir:0,wf:0,stack:[],
+  carry(){return this.stack.length},
+  maxC(){return 5+carryLvl*3}};
+
+// Wheat
+const wheat={x:50,y:130,w:220,h:180,tiles:[],regrow:3};
+for(let r=0;r<3;r++)for(let c=0;c<4;c++)
+  wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+r*52,grown:true,timer:0});
+
+// Active tiers (runtime state for each unlocked tier)
+const activeTiers=[]; // {tier, pen, booth, animals, products, pads, workers, feedLevel, feedTimer, prodTimer, custTimer}
+
+// All world pads
+let allPads=[];
+
+// ═══════════════════════════════════════
+// LAYOUT — positions tiers on the map
+// ═══════════════════════════════════════
+function tierPos(idx){
+  // Single column layout, each tier stacked below the previous with plenty of space
+  return {
+    penX: 350,
+    penY: 100 + idx * 300,
+    boothX: 680,
+    boothY: 130 + idx * 300,
+  };
+}
+
+// ═══════════════════════════════════════
+// ACTIVATION — unlock a tier
+// ═══════════════════════════════════════
+function activateTier(tierIdx){
+  const cfg=TIERS[tierIdx];
+  const pos=tierPos(tierIdx);
+
+  const pen={x:pos.penX,y:pos.penY,w:cfg.penW,h:cfg.penH};
+  const feederX=pen.x, feederY=pen.y+pen.h-20;
+  const booth={x:pos.boothX,y:pos.boothY,customers:[],custTimer:0};
+
+  const animals=[];
+  for(let i=0;i<cfg.startN;i++)
+    animals.push({x:rnd(pen.x+30,pen.x+pen.w-30),y:rnd(pen.y+30,pen.y+pen.h-60),tx:0,ty:0,timer:rnd(0,3)});
+
+  const state={
+    tier:cfg, tierIdx, pen, booth, animals,
+    products:[], // items on ground
+    workers:[], // {type:'collector'|'seller', ...worker state}
+    feedLevel:tierIdx===0?0:0,
+    feedMax:cfg.feedMax,
+    feederX, feederY,
+    prodTimer:0, custTimer:0,
+    pads:[], // local pads for this tier
+  };
+
+  // Create upgrade pads for this tier — spread around pen and booth
+  const px=pen.x, py=pen.y, bx=booth.x, by=booth.y;
+  const pads=[];
+
+  // More animals — left of pen
+  pads.push(mkPad(px-90,py+30,cfg.animal,`+1 ${cfg.animalName}`,cfg.animalCost,
+    (p)=>{
+      state.animals.push({x:rnd(pen.x+30,pen.x+pen.w-30),y:rnd(pen.y+30,pen.y+pen.h-60),tx:0,ty:0,timer:0});
+      if(state.animals.length>=cfg.maxN)p.done=true;
+      else{p.paid=0;p.cost=Math.floor(p.cost*1.4);}
+    },true,0,cfg.maxN-cfg.startN));
+
+  // Collector worker — below pen, left side
+  pads.push(mkPad(px,py+pen.h+20,'👷','Collector',200+tierIdx*100,
+    (p)=>{
+      p.done=true;
+      const w=mkWorker('collector',pen.x+pen.w/2,pen.y+pen.h/2,state);
+      state.workers.push(w);
+      // Worker upgrades — below the collector pad
+      pads.push(mkPad(px,py+pen.h+100,'⚡','W.Speed',80,(p2)=>{
+        w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
+      },true,0,5));
+      pads.push(mkPad(px+90,py+pen.h+100,'📦','W.Carry',100,(p2)=>{
+        w.maxStack+=3;p2.paid=0;p2.cost=Math.floor(p2.cost*1.5);
+      },true,0,4));
+      rebuildPads();
+    }));
+
+  // Seller worker — below booth
+  pads.push(mkPad(bx-20,by+80,'🧑‍💼','Seller',250+tierIdx*120,
+    (p)=>{
+      p.done=true;
+      const w=mkWorker('seller',bx,by+35,state);
+      state.workers.push(w);
+      // Worker upgrades — to the right of booth
+      pads.push(mkPad(bx+70,by+80,'⚡','W.Speed',80,(p2)=>{
+        w.speed+=20;p2.paid=0;p2.cost=Math.floor(p2.cost*1.6);
+      },true,0,5));
+      pads.push(mkPad(bx+70,by+160,'📦','W.Carry',100,(p2)=>{
+        w.maxStack+=3;p2.paid=0;p2.cost=Math.floor(p2.cost*1.5);
+      },true,0,4));
+      rebuildPads();
+    }));
+
+  state.pads=pads;
+  activeTiers.push(state);
+
+  // Unlock pad for NEXT tier — centered between current and next row
+  if(tierIdx+1<TIERS.length){
+    const next=TIERS[tierIdx+1];
+    const curY=pos.penY;
+    const nextY=curY + 300; // matches tierPos spacing
+    const unlockY=curY + pen.h + 40; // just below current pen, well above next
+    const p=mkPad(pen.x+pen.w/2-40, unlockY, next.animal,next.name,next.unlockCost,
+      ()=>activateTier(tierIdx+1),false,0,0,52);
+    p._isNextTier=true;
+    allPads.push(p);
+  }
+
+  rebuildPads();
+}
+
+function mkPad(x,y,icon,label,cost,action,repeatable,level,maxLevel,size){
+  return {x,y,icon,label,cost,paid:0,done:false,action,
+    repeatable:!!repeatable,level:level||0,maxLevel:maxLevel||99,size:size||40};
+}
+
+function mkWorker(type,hx,hy,tierState){
+  return {x:hx,y:hy,tx:hx,ty:hy,homeX:hx,homeY:hy,
+    speed:90,maxStack:6,stack:[],state:'idle',
+    type,tierState,dir:0,wf:0,timer:0,sellTimer:0};
+}
+
+function rebuildPads(){
+  // Global pads + all tier pads
+  const gp=[];
+  // Lily upgrades (placed near wheat field)
+  gp.push(...globalPads);
+  activeTiers.forEach(s=>gp.push(...s.pads));
+  // Next tier pads already in allPads
+  allPads=gp.concat(allPads.filter(p=>p._isNextTier));
+}
+
+// Global upgrade pads
+const globalPads=[
+  mkPad(10,wheat.y+wheat.h+20,'👟','Speed',50,()=>{speedLvl++;globalPads[0].paid=0;globalPads[0].cost=Math.floor(50*Math.pow(1.5,speedLvl))},true,0,10),
+  mkPad(10,wheat.y+wheat.h+100,'📦','Carry',40,()=>{carryLvl++;globalPads[1].paid=0;globalPads[1].cost=Math.floor(40*Math.pow(1.5,carryLvl))},true,0,8),
+  mkPad(10,wheat.y+wheat.h+180,'⚡','Fast Wheat',120,()=>{wheatLvl++;globalPads[2].paid=0;globalPads[2].cost=Math.floor(120*Math.pow(1.6,wheatLvl))},true,0,5),
+  mkPad(wheat.x+wheat.w+20,wheat.y+wheat.h+20,'🌾','+Wheat',80,(p)=>{
+    // Add a row of wheat
+    const row=Math.floor(wheat.tiles.length/4);
+    for(let c=0;c<4;c++)wheat.tiles.push({x:wheat.x+25+c*52,y:wheat.y+25+row*52,grown:true,timer:0});
+    wheat.h+=52;
+    p.y+=52; // move pad down
+    p.paid=0;p.cost=Math.floor(p.cost*1.5);
+  },true,0,4),
+];
+allPads=[...globalPads];
+
+// Mark next-tier pads
+function markNextTier(){
+  allPads.forEach(p=>{if(!globalPads.includes(p)&&!activeTiers.some(s=>s.pads.includes(p)))p._isNextTier=true});
+}
+
+// Start with chickens
+activateTier(0);
+markNextTier();
+
+// ═══════════════════════════════════════
+// CUSTOMER DRAWING DATA
+// ═══════════════════════════════════════
+const HAIR_COLORS=['#5d4037','#3e2723','#ffcc02','#d84315','#bdbdbd','#212121','#6d4c41'];
+const OUTFIT_COLORS=['#e91e63','#9c27b0','#2196f3','#4caf50','#ff9800','#f44336','#00bcd4',
+  '#8bc34a','#ff5722','#607d8b','#795548','#3f51b5','#009688','#ffc107'];
+
+function mkCustomer(booth,i,tierState){
+  return {
+    x:booth.x+220, y:booth.y+25+i*38,
+    tx:booth.x+50, ty:booth.y+25+i*38,
+    state:'walking', timer:0,
+    patience:tierState.tier.custPatience,
+    maxPatience:tierState.tier.custPatience,
+    // Appearance
+    hair:pick(HAIR_COLORS),
+    outfit:pick(OUTFIT_COLORS),
+    hat:Math.random()>.6?pick(['#fdd835','#e91e63','#4caf50','#2196f3']):null,
+    happy:0, // happy bounce timer after being served
+  };
+}
+
+// ═══════════════════════════════════════
+// WORKER AI
+// ═══════════════════════════════════════
+function moveTo(w,x,y,dt){
+  const dx=x-w.x,dy=y-w.y,d=Math.hypot(dx,dy);
+  if(d>5){w.x+=(dx/d)*w.speed*dt;w.y+=(dy/d)*w.speed*dt;w.wf+=dt*8;
+    if(Math.abs(dx)>Math.abs(dy))w.dir=dx>0?3:1;else w.dir=dy>0?0:2;return false;}
+  return true;
+}
+
+function updateWorker(w,dt){
+  const ts=w.tierState, pen=ts.pen, booth=ts.booth, cfg=ts.tier;
+
+  if(w.type==='collector'){
+    if(w.state==='idle'){
+      if(ts.products.length>0) w.state='goCollect';
+      else moveTo(w,w.homeX,w.homeY,dt);
+    }
+    if(w.state==='goCollect'){
+      const p=ts.products[0];
+      if(p){
+        if(moveTo(w,p.x,p.y,dt)){
+          for(let i=ts.products.length-1;i>=0;i--){
+            if(dist(w,ts.products[i])<35&&w.stack.length<w.maxStack){
+              w.stack.push({type:cfg.id,emoji:cfg.product});
+              ts.products.splice(i,1);sfxCollect();
+            }
+          }
+        }
+        if(w.stack.length>=w.maxStack||(ts.products.length===0&&w.stack.length>0)) w.state='goSell';
+      } else{if(w.stack.length>0)w.state='goSell';else w.state='idle';}
+    }
+    if(w.state==='goSell'){
+      // Find booth or lily or seller worker to drop off
+      const seller=ts.workers.find(sw=>sw.type==='seller');
+      const target=seller?{x:seller.homeX,y:seller.homeY}:{x:booth.x,y:booth.y+35};
+      if(moveTo(w,target.x,target.y,dt)){
+        if(seller&&dist(w,seller)<50){
+          while(w.stack.length>0&&seller.stack.length<seller.maxStack){
+            seller.stack.push(w.stack.pop());
+          }
+        }
+        // If no seller, drop for lily? Or just sell directly
+        if(!seller){
+          const cust=booth.customers.find(c=>c.state==='waiting');
+          if(cust&&w.stack.length>0){
+            w.sellTimer+=dt;
+            if(w.sellTimer>.25){w.sellTimer=0;
+              const item=w.stack.pop();
+              addCoins(cfg.value,booth.x,booth.y-10);sfxSell();
+              flies.push({x:w.x,y:w.y-20,tx:cust.x,ty:cust.y,emoji:item.emoji,t:0,dur:.3});
+              cust.timer++;if(cust.timer>=2||w.stack.length===0){cust.state='served';cust.happy=.8;}
+            }
+            return;
+          }
+        }
+        w.stack=[];w.state='idle';
+      }
+    }
+  }
+
+  if(w.type==='seller'){
+    if(w.state==='idle'){
+      const cust=booth.customers.find(c=>c.state==='waiting');
+      if(w.stack.length>0&&cust) w.state='selling';
+      else if(w.stack.length===0){
+        // Go collect from pen
+        if(ts.products.length>0) w.state='goCollect';
+        else moveTo(w,w.homeX,w.homeY,dt);
+      } else moveTo(w,w.homeX,w.homeY,dt);
+    }
+    if(w.state==='selling'){
+      if(moveTo(w,booth.x,booth.y+35,dt)){
+        const cust=booth.customers.find(c=>c.state==='waiting');
+        if(cust&&w.stack.length>0){
+          w.sellTimer+=dt;
+          if(w.sellTimer>.2){w.sellTimer=0;
+            const item=w.stack.pop();
+            addCoins(cfg.value,booth.x,booth.y-10);sfxSell();
+            flies.push({x:w.x,y:w.y-20,tx:cust.x,ty:cust.y,emoji:item.emoji,t:0,dur:.3});
+            cust.timer++;if(cust.timer>=2||w.stack.length===0){cust.state='served';cust.happy=.8;}
+          }
+        } else w.state='idle';
+      }
+    }
+    if(w.state==='goCollect'){
+      const p=ts.products[0];
+      if(p){
+        if(moveTo(w,p.x,p.y,dt)){
+          for(let i=ts.products.length-1;i>=0;i--){
+            if(dist(w,ts.products[i])<35&&w.stack.length<w.maxStack){
+              w.stack.push({type:cfg.id,emoji:cfg.product});
+              ts.products.splice(i,1);sfxCollect();
+            }
+          }
+        }
+        if(w.stack.length>=w.maxStack-1||(ts.products.length===0&&w.stack.length>0)) w.state='idle';
+      } else w.state='idle';
+    }
+  }
+}
+
+// ═══════════════════════════════════════
+// WORLD BOUNDS — expands as you unlock
+// ═══════════════════════════════════════
+function getWorldBounds(){
+  // Start with wheat field area
+  let x1=wheat.x-30, y1=wheat.y-40;
+  let x2=wheat.x+wheat.w+100, y2=wheat.y+wheat.h+80;
+
+  // Expand for each active tier
+  activeTiers.forEach(ts=>{
+    const p=ts.pen, b=ts.booth;
+    x1=Math.min(x1, p.x-100);
+    y1=Math.min(y1, p.y-50);
+    x2=Math.max(x2, b.x+120);
+    y2=Math.max(y2, p.y+p.h+80);
+  });
+
+  // Expand for visible pads (including next-tier unlock pads)
+  allPads.forEach(pad=>{
+    if(pad.done)return;
+    x1=Math.min(x1, pad.x-30);
+    y1=Math.min(y1, pad.y-30);
+    x2=Math.max(x2, pad.x+120);
+    y2=Math.max(y2, pad.y+100);
+  });
+
+  // Expand for global pads
+  globalPads.forEach(pad=>{
+    if(pad.done)return;
+    x1=Math.min(x1, pad.x-30);
+    y2=Math.max(y2, pad.y+100);
+  });
+
+  return {x1,y1,x2,y2};
+}
+
+// ═══════════════════════════════════════
+// MOBILE DETECTION + JOYSTICK
+// ═══════════════════════════════════════
+const isMobile='ontouchstart' in window;
+let joyActive=false,joyDx=0,joyDy=0,joyTouchId=-1;
+const JOY_R=50; // joystick radius
+
+function getJoyCenter(){return {x:70,y:H-90};}
+
+// ═══════════════════════════════════════
+// GAME UPDATE
+// ═══════════════════════════════════════
+function addCoins(n,x,y){coins+=n;totalEarned+=n;if(x!==undefined){floats.push({x,y:y-20,text:`+${n}🪙`,t:1,color:'#fdd835'});sfxCoin()}}
+let sellCD=0;
+
+function update(dt){
+  // ─── Lily movement ───
+  let mx=0,my=0;
+  if(isMobile&&joyActive){
+    // Mobile: joystick controls
+    mx=joyDx;my=joyDy;
+  } else {
+    // Desktop: follow cursor
+    const ddx=targetX-lily.x,ddy=targetY-lily.y,dd=Math.hypot(ddx,ddy);
+    if(dd>8){mx=ddx/dd;my=ddy/dd;mx*=Math.min(1,dd/100);my*=Math.min(1,dd/100);}
+  }
+  const mag=Math.hypot(mx,my);
+  if(mag>0.05){
+    const spd=(150+speedLvl*25)*mag;
+    lily.x+=mx/mag*spd*dt*mag;lily.y+=my/mag*spd*dt*mag;
+    lily.wf+=dt*10;
+    if(Math.abs(mx)>Math.abs(my))lily.dir=mx>0?3:1;else lily.dir=my>0?0:2;
+  }
+  // Dynamic world bounds — only walk a bit past what's unlocked
+  const bounds=getWorldBounds();
+  lily.x=clamp(lily.x,bounds.x1-40,bounds.x2+40);
+  lily.y=clamp(lily.y,bounds.y1-40,bounds.y2+40);
+  camX=lerp(camX,lily.x-W/2,dt*5);camY=lerp(camY,lily.y-H/2,dt*5);
+
+  // ─── Wheat harvest ───
+  const regrow=wheat.regrow/(1+wheatLvl*.5);
+  wheat.tiles.forEach(t=>{
+    if(!t.grown){t.timer+=dt;if(t.timer>=regrow){t.grown=true;t.timer=0;}return;}
+    if(dist(lily,t)<30&&lily.carry()<lily.maxC()){
+      t.grown=false;t.timer=0;lily.stack.push({type:'wheat',emoji:'🌾'});sfxCollect();
+    }
+  });
+
+  // ─── Farm hand workers also harvest ───
+  // (handled in their worker AI — we'll add a global farmhand option later)
+
+  // ─── Per-tier update ───
+  activeTiers.forEach(ts=>{
+    const cfg=ts.tier;
+
+    // Feeder: Lily dumps wheat
+    if(dist(lily,{x:ts.feederX+30,y:ts.feederY})<45){
+      for(let i=lily.stack.length-1;i>=0;i--){
+        if(lily.stack[i].type==='wheat'&&ts.feedLevel<ts.feedMax){
+          flies.push({x:lily.x,y:lily.y-20,tx:ts.feederX+30,ty:ts.feederY,emoji:'🌾',t:0,dur:.25});
+          lily.stack.splice(i,1);ts.feedLevel++;
+        }
+      }
+    }
+
+    // Feed drains → produce
+    if(ts.feedLevel>0){
+      ts.feedLevel=Math.max(0,ts.feedLevel-cfg.feedDrain*dt);
+      ts.prodTimer+=dt;
+      if(ts.prodTimer>=cfg.prodInterval&&ts.products.length<cfg.maxProd){
+        ts.prodTimer=0;
+        const a=ts.animals[rndInt(0,ts.animals.length-1)];
+        if(a) ts.products.push({x:a.x+rnd(-15,15),y:a.y+rnd(10,20)});
+      }
+    }
+
+    // Animals wander
+    ts.animals.forEach(a=>{
+      a.timer-=dt;
+      if(a.timer<=0){a.tx=rnd(ts.pen.x+25,ts.pen.x+ts.pen.w-25);a.ty=rnd(ts.pen.y+25,ts.pen.y+ts.pen.h-55);a.timer=rnd(2,5);}
+      const adx=a.tx-a.x,ady=a.ty-a.y,ad=Math.hypot(adx,ady);
+      if(ad>3){a.x+=(adx/ad)*cfg.animalSpeed*dt;a.y+=(ady/ad)*cfg.animalSpeed*dt;}
+    });
+
+    // Lily collects products
+    for(let i=ts.products.length-1;i>=0;i--){
+      if(dist(lily,ts.products[i])<30&&lily.carry()<lily.maxC()){
+        const p=ts.products.splice(i,1)[0];
+        lily.stack.push({type:cfg.id,emoji:cfg.product});
+        flies.push({x:p.x,y:p.y,tx:lily.x,ty:lily.y-30,emoji:cfg.product,t:0,dur:.25});
+        sfxCollect();
+      }
+    }
+
+    // Customers
+    ts.custTimer+=dt;
+    if(ts.custTimer>cfg.custInterval&&ts.booth.customers.length<5){
+      ts.custTimer=0;
+      ts.booth.customers.push(mkCustomer(ts.booth,ts.booth.customers.length,ts));
+    }
+    for(let i=ts.booth.customers.length-1;i>=0;i--){
+      const cu=ts.booth.customers[i];
+      if(cu.state==='walking'||cu.state==='waiting'){cu.tx=ts.booth.x+50;cu.ty=ts.booth.y+25+i*38;}
+      const cdx=cu.tx-cu.x,cdy=cu.ty-cu.y,cd=Math.hypot(cdx,cdy);
+      if(cd>2){cu.x+=(cdx/cd)*120*dt;cu.y+=(cdy/cd)*120*dt;}
+      else if(cu.state==='walking')cu.state='waiting';
+      if(cu.state==='waiting'){cu.patience-=dt;if(cu.patience<=0){cu.state='leaving';cu.tx=ts.booth.x+260;}}
+      if(cu.state==='served'){cu.happy-=dt;if(cu.happy<=0){cu.state='leaving';cu.tx=ts.booth.x+260;}}
+      if(cu.state==='leaving'&&dist(cu,{x:cu.tx,y:cu.ty})<5)ts.booth.customers.splice(i,1);
+    }
+
+    // Lily sells at booth
+    const near=dist(lily,{x:ts.booth.x,y:ts.booth.y+35})<50;
+    const cust=ts.booth.customers.find(c=>c.state==='waiting');
+    if(near&&cust){
+      // Sell matching product
+      const idx=lily.stack.findIndex(s=>s.type===cfg.id);
+      if(idx>=0){
+        sellCD+=dt;
+        if(sellCD>.18){sellCD=0;
+          const item=lily.stack.splice(idx,1)[0];
+          addCoins(cfg.value,ts.booth.x,ts.booth.y-10);sfxSell();
+          flies.push({x:lily.x,y:lily.y-20,tx:cust.x,ty:cust.y,emoji:item.emoji,t:0,dur:.3});
+          cust.timer++;if(cust.timer>=2){cust.state='served';cust.happy=.8;}
+        }
+      }
+    }
+
+    // Drop off to workers
+    ts.workers.forEach(w=>{
+      if(dist(lily,w)<50&&lily.stack.length>0){
+        for(let i=lily.stack.length-1;i>=0;i--){
+          if(lily.stack[i].type===cfg.id&&w.stack.length<w.maxStack){
+            w.stack.push(lily.stack.splice(i,1)[0]);sfxCollect();
+          }
+        }
+      }
+      updateWorker(w,dt);
+    });
+  });
+
+  // ─── World pads ───
+  allPads.forEach(pad=>{
+    if(pad.done)return;
+    const cx=pad.x+40,cy=pad.y+30;
+    if(dist(lily,{x:cx,y:cy})<50&&coins>0){
+      const drain=Math.min(Math.ceil(pad.cost*dt*2.5),coins,pad.cost-pad.paid);
+      if(drain>0){coins-=drain;pad.paid+=drain;
+        if(pad.paid>=pad.cost){
+          sfxUnlock();
+          if(typeof pad.action==='function')pad.action(pad);
+          if(!pad.repeatable)pad.done=true;
+          floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
+        }
+      }
+    }
+  });
+
+  // ─── Animate ───
+  flies.forEach(f=>{f.t+=dt;const p=Math.min(1,f.t/f.dur);f.x=lerp(f.x,f.tx,p*.4);f.y=lerp(f.y,f.ty,p*.4);f.y-=(1-p)*50*dt});
+  flies=flies.filter(f=>f.t<f.dur);
+  floats.forEach(f=>{f.t-=dt;f.y-=30*dt});
+  floats=floats.filter(f=>f.t>0);
+}
+
+// ═══════════════════════════════════════
+// DRAWING
+// ═══════════════════════════════════════
+function drawChar(x,y,dir,wf,body,hat,hair){
+  G.save();G.translate(x,y);
+  const b=Math.sin(wf)*2;
+  G.fillStyle='rgba(0,0,0,0.15)';G.beginPath();G.ellipse(0,18,13,4,0,0,Math.PI*2);G.fill();
+  G.fillStyle=body;G.beginPath();G.moveTo(-9,b);G.lineTo(-12,18);G.lineTo(12,18);G.lineTo(9,b);G.closePath();G.fill();
+  // Arms
+  G.strokeStyle=body;G.lineWidth=3;G.lineCap='round';
+  G.beginPath();G.moveTo(-9,3+b);G.lineTo(-14,12+b);G.stroke();
+  G.beginPath();G.moveTo(9,3+b);G.lineTo(14,12+b);G.stroke();
+  G.fillStyle='#ffcc80';G.beginPath();G.arc(0,-7+b,10,0,Math.PI*2);G.fill();
+  G.fillStyle=hair||'#5d4037';G.beginPath();G.arc(0,-12+b,10,Math.PI,Math.PI*2);G.fill();
+  // Side hair
+  G.beginPath();G.arc(-10,-5+b,4,0,Math.PI*2);G.fill();
+  G.beginPath();G.arc(10,-5+b,4,0,Math.PI*2);G.fill();
+  G.fillStyle='#333';G.beginPath();G.arc(-3.5,-7+b,1.5,0,Math.PI*2);G.fill();
+  G.beginPath();G.arc(3.5,-7+b,1.5,0,Math.PI*2);G.fill();
+  G.beginPath();G.arc(0,-4+b,3,.2,Math.PI-.2);G.strokeStyle='#c62828';G.lineWidth=1;G.stroke();
+  if(hat){G.fillStyle=hat;G.beginPath();G.ellipse(0,-16+b,13,3.5,0,0,Math.PI*2);G.fill();
+    G.fillRect(-6,-24+b,12,9);G.beginPath();G.arc(0,-24+b,6,Math.PI,Math.PI*2);G.fill();}
+  G.restore();
+}
+
+function drawCustomer(cu){
+  // Bounce when happy
+  const by=cu.state==='served'?Math.sin(cu.happy*20)*5:0;
+  // Foot tap when waiting impatiently
+  const tap=cu.state==='waiting'&&cu.patience<cu.maxPatience*.5?Math.sin(Date.now()*.01)*1.5:0;
+  drawChar(cu.x,cu.y+by+tap,0,cu.state==='walking'?Date.now()*.008:0,cu.outfit,cu.hat,cu.hair);
+  // Patience bar
+  if(cu.state==='waiting'){
+    const p=cu.patience/cu.maxPatience;
+    G.fillStyle=p>.5?'#4caf50':p>.25?'#ff9800':'#f44336';
+    G.fillRect(cu.x-12,cu.y-22,24*p,3);
+    G.fillStyle='rgba(0,0,0,0.3)';G.fillRect(cu.x-12+24*p,cu.y-22,24*(1-p),3);
+  }
+  // Happy emoji
+  if(cu.state==='served'){G.font='14px serif';G.textAlign='center';G.fillText('😊',cu.x,cu.y-25+by);}
+}
+
+function drawStack(x,y,stack,sz){
+  sz=sz||18;
+  stack.forEach((item,i)=>{
+    const w=Math.sin(Date.now()*.008+i*.5)*(1+i*.3);
+    G.font=sz+'px serif';G.textAlign='center';G.textBaseline='middle';
+    G.fillText(item.emoji,x+w,y-30-i*(sz*.7));
+  });
+  if(stack.length>1){
+    const cy=y-33-stack.length*(sz*.7);
+    G.fillStyle='rgba(0,0,0,0.5)';G.beginPath();G.arc(x,cy,9,0,Math.PI*2);G.fill();
+    G.font='bold 10px sans-serif';G.fillStyle='#fff';G.textAlign='center';G.textBaseline='middle';
+    G.fillText(stack.length,x,cy);
+  }
+}
+
+function drawFeeder(fx,fy,level,max){
+  G.fillStyle='#795548';G.fillRect(fx,fy-12,60,24);
+  G.fillStyle='#5d4037';G.fillRect(fx+2,fy-10,56,20);
+  const p=level/max;
+  G.fillStyle='#fdd835';G.fillRect(fx+3,fy-9+18*(1-p),54,18*p);
+  G.font='10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+  G.fillText(`${Math.floor(level)}/${max}`,fx+30,fy+20);
+}
+
+function drawArea(x,y,w,h,color,label){
+  G.fillStyle=color;G.fillRect(x,y,w,h);
+  G.strokeStyle='#5d4037';G.lineWidth=3;G.strokeRect(x,y,w,h);
+  G.fillStyle='#4e342e';
+  for(let i=x;i<=x+w;i+=35){G.fillRect(i-2,y-5,4,10);G.fillRect(i-2,y+h-5,4,10);}
+  G.font='bold 12px sans-serif';G.fillStyle='#fff';G.textAlign='center';G.fillText(label,x+w/2,y-7);
+}
+
+function drawPad(pad){
+  if(pad.done)return;
+  const cx=pad.x+40,cy=pad.y+30,r=pad.size/2+8;
+  const pct=pad.paid/pad.cost;
+  const pulse=.6+Math.sin(Date.now()*.004)*.3;
+  const near=dist(lily,{x:cx,y:cy})<55&&coins>0;
+  if(near){G.beginPath();G.arc(cx,cy,r+12,0,Math.PI*2);G.fillStyle=`rgba(253,216,53,${pulse*.2})`;G.fill();}
+  G.beginPath();G.arc(cx,cy,r,0,Math.PI*2);G.fillStyle='rgba(0,0,0,0.55)';G.fill();
+  G.beginPath();G.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);G.strokeStyle='#fdd835';G.lineWidth=5;G.lineCap='round';G.stroke();
+  G.beginPath();G.arc(cx,cy,r,-Math.PI/2+Math.PI*2*pct,-Math.PI/2+Math.PI*2);G.strokeStyle='rgba(255,255,255,0.12)';G.lineWidth=5;G.stroke();
+  G.font=`${pad.size}px serif`;G.textAlign='center';G.textBaseline='middle';
+  G.globalAlpha=.35+pct*.65;G.fillText(pad.icon,cx,cy-1);G.globalAlpha=1;
+  G.font='bold 10px sans-serif';G.fillStyle='#fff';G.textAlign='center';
+  G.fillText(pad.label+(pad.level>0?` ${pad.level}`:''),cx,cy+r+12);
+  const rem=pad.cost-Math.floor(pad.paid);
+  G.font='bold 11px sans-serif';G.fillStyle='#fdd835';
+  G.fillText(`${rem}🪙`,cx,cy+r+24);
+  if(near&&pct<1)for(let i=0;i<3;i++){const a=Date.now()*.008+i*2.09;
+    G.beginPath();G.arc(cx+Math.cos(a)*(r+4),cy+Math.sin(a)*(r+4),2,0,Math.PI*2);
+    G.fillStyle=`rgba(253,216,53,${pulse})`;G.fill();}
+}
+
+function drawWorld(){
+  G.save();G.translate(-camX,-camY);
+
+  // Ground
+  G.fillStyle='#7cb342';G.fillRect(-500,-500,3000,2500);
+  G.fillStyle='rgba(0,0,0,0.025)';
+  for(let x=-500;x<2500;x+=40)for(let y=-500;y<2000;y+=40)
+    if((x+y)%80===0)G.fillRect(x,y,40,40);
+
+  // Paths
+  G.fillStyle='#a1887f';
+  G.fillRect(wheat.x+wheat.w,wheat.y+wheat.h/2-12,100,24);
+  activeTiers.forEach(ts=>{
+    G.fillRect(ts.pen.x+ts.pen.w,ts.pen.y+ts.pen.h/2-12,ts.booth.x-ts.pen.x-ts.pen.w,24);
+  });
+
+  // Wheat field
+  drawArea(wheat.x,wheat.y,wheat.w,wheat.h,'#8d6e63','🌾 Wheat Field');
+  wheat.tiles.forEach(t=>{
+    G.font='26px serif';G.textAlign='center';G.textBaseline='middle';
+    if(t.grown){const s=Math.sin(Date.now()*.003+t.x*.1)*2;G.fillText('🌾',t.x+s,t.y);}
+    else{G.globalAlpha=.3;G.fillText('🌱',t.x,t.y);G.globalAlpha=1;
+      const p=t.timer/(wheat.regrow/(1+wheatLvl*.5));
+      G.fillStyle='#8bc34a';G.fillRect(t.x-10,t.y+15,20*p,3);}
+  });
+
+  // Tier areas
+  activeTiers.forEach(ts=>{
+    const cfg=ts.tier,pen=ts.pen;
+    const penColors=['#a5d6a7','#c8e6c9','#ffe0b2','#d1c4e9','#fff9c4'];
+    drawArea(pen.x,pen.y,pen.w,pen.h,penColors[ts.tierIdx%5],`${cfg.animal} ${cfg.name}`);
+    drawFeeder(ts.feederX,ts.feederY,ts.feedLevel,ts.feedMax);
+
+    G.font=`${cfg.id==='bee'?22:28}px serif`;G.textAlign='center';G.textBaseline='middle';
+    ts.animals.forEach(a=>{const b=Math.sin(Date.now()*.006+a.x)*2;G.fillText(cfg.animal,a.x,a.y+b);});
+
+    G.font='20px serif';
+    ts.products.forEach(p=>{const b=Math.sin(Date.now()*.005+p.x+p.y);G.fillText(cfg.product,p.x,p.y+b);});
+
+    // Booth
+    const bth=ts.booth;
+    G.fillStyle='#795548';G.fillRect(bth.x-25,bth.y-20,50,60);
+    G.fillStyle='#ffab40';G.fillRect(bth.x-22,bth.y-17,44,24);
+    G.font='20px serif';G.textAlign='center';G.textBaseline='middle';
+    G.fillText(cfg.product,bth.x,bth.y-5);
+    G.font='9px sans-serif';G.fillStyle='#fff';G.fillText(cfg.prodName+' Shop',bth.x,bth.y+30);
+
+    // Customers (drawn as characters)
+    bth.customers.forEach(cu=>drawCustomer(cu));
+
+    // Workers
+    ts.workers.forEach(w=>{
+      const cols=w.type==='seller'?['#1565c0','#f44336','#3e2723']:['#2e7d32','#795548','#5d4037'];
+      drawChar(w.x,w.y,w.dir,w.wf,cols[0],cols[1],cols[2]);
+      drawStack(w.x,w.y,w.stack,14);
+      G.font='16px serif';G.textAlign='center';
+      G.fillText(w.type==='seller'?'🏪':'📥',w.x,w.y-24-(w.stack.length>0?w.stack.length*10+8:0));
+    });
+  });
+
+  // All pads
+  allPads.forEach(drawPad);
+
+  // Lily
+  drawChar(lily.x,lily.y,lily.dir,lily.wf,'#e91e63','#fdd835','#5d4037');
+  drawStack(lily.x,lily.y,lily.stack);
+
+  // World boundary fence
+  const b=getWorldBounds();
+  G.strokeStyle='#5d4037';G.lineWidth=4;G.setLineDash([8,8]);
+  G.strokeRect(b.x1-20,b.y1-20,b.x2-b.x1+40,b.y2-b.y1+40);
+  G.setLineDash([]);
+  // Fence posts
+  G.fillStyle='#4e342e';
+  for(let fx=b.x1-20;fx<=b.x2+20;fx+=50){G.fillRect(fx-3,b.y1-26,6,12);G.fillRect(fx-3,b.y2+14,6,12);}
+  for(let fy=b.y1-20;fy<=b.y2+20;fy+=50){G.fillRect(b.x1-26,fy-3,12,6);G.fillRect(b.x2+14,fy-3,12,6);}
+
+  // Flying items
+  flies.forEach(f=>{G.font='16px serif';G.textAlign='center';G.textBaseline='middle';G.fillText(f.emoji,f.x,f.y);});
+  // Floating texts
+  floats.forEach(f=>{G.font='bold 15px sans-serif';G.fillStyle=f.color;G.textAlign='center';G.globalAlpha=Math.min(1,f.t*2);G.fillText(f.text,f.x,f.y);G.globalAlpha=1;});
+
+  G.restore();
+}
+
+// ═══════════════════════════════════════
+// HUD
+// ═══════════════════════════════════════
+function drawHUD(){
+  G.fillStyle='rgba(62,39,35,0.88)';G.fillRect(0,0,W,42);
+  G.font='bold 22px sans-serif';G.fillStyle='#fdd835';G.textAlign='left';G.fillText(`🪙 ${coins}`,14,30);
+  G.font='bold 15px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';G.fillText("Lily's Farm",W/2,17);
+  G.font='12px sans-serif';G.fillStyle='#aaa';G.fillText(`Carry: ${lily.carry()}/${lily.maxC()}`,W/2,35);
+
+  // Stack summary
+  const counts={};
+  lily.stack.forEach(s=>{counts[s.emoji]=(counts[s.emoji]||0)+1;});
+  G.font='14px sans-serif';G.textAlign='right';G.fillStyle='#fff';
+  let ix=W-14;
+  Object.entries(counts).forEach(([emoji,n])=>{G.fillText(`${emoji}${n}`,ix,30);ix-=50;});
+
+  // Tutorial
+  if(totalEarned===0){
+    G.font=`bold ${isMobile?13:15}px sans-serif`;G.fillStyle='#fff';G.textAlign='center';
+    G.globalAlpha=.5+Math.sin(Date.now()*.003)*.5;
+    let h='';
+    const verb=isMobile?'Move Lily to':'Move cursor to';
+    if(lily.carry()===0)h=`${verb} the wheat field!`;
+    else if(lily.stack.some(s=>s.type==='wheat'))h=`${verb} the chicken feeder!`;
+    else if(activeTiers[0].feedLevel>0&&activeTiers[0].products.length===0)h='Chickens are eating... eggs coming!';
+    else if(activeTiers[0].products.length>0)h='Collect eggs, then sell at the egg shop!';
+    if(h)G.fillText(h,W/2,62);
+    G.globalAlpha=1;
+  }
+
+  // Mobile joystick
+  if(isMobile){
+    const jc=getJoyCenter();
+    G.globalAlpha=.25;G.fillStyle='#fff';
+    G.beginPath();G.arc(jc.x,jc.y,JOY_R,0,Math.PI*2);G.fill();
+    G.globalAlpha=.5;G.fillStyle='#fff';
+    const kx=jc.x+joyDx*JOY_R*.7, ky=jc.y+joyDy*JOY_R*.7;
+    G.beginPath();G.arc(kx,ky,20,0,Math.PI*2);G.fill();
+    G.globalAlpha=1;
+  }
+}
+
+// ═══════════════════════════════════════
+// INPUT
+// ═══════════════════════════════════════
+function s2w(sx,sy){return{x:sx+camX,y:sy+camY}}
+
+// Desktop: cursor follow
+C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;targetY=w.y;});
+
+// Mobile: virtual joystick
+C.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const jc=getJoyCenter();
+    if(Math.hypot(t.clientX-jc.x,t.clientY-jc.y)<JOY_R*1.8){
+      joyActive=true;joyTouchId=t.identifier;
+      joyDx=0;joyDy=0;
+    }
+  }
+});
+C.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    if(joyActive&&t.identifier===joyTouchId){
+      const jc=getJoyCenter();
+      const dx=t.clientX-jc.x,dy=t.clientY-jc.y;
+      const d=Math.hypot(dx,dy);
+      const maxD=JOY_R;
+      joyDx=clamp(dx/maxD,-1,1);
+      joyDy=clamp(dy/maxD,-1,1);
+    }
+  }
+});
+C.addEventListener('touchend',e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===joyTouchId){joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;}
+  }
+});
+C.addEventListener('touchcancel',()=>{joyActive=false;joyDx=0;joyDy=0;joyTouchId=-1;});
+
+// ═══════════════════════════════════════
+// LOOP
+// ═══════════════════════════════════════
+let lt=0;
+function loop(t){
+  const dt=Math.min((t-lt)/1000,.05);lt=t;
+  update(dt);
+  G.clearRect(0,0,W,H);
+  drawWorld();
+  drawHUD();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
