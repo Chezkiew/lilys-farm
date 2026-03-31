@@ -12,10 +12,20 @@ canvas{display:block;width:100vw;height:100vh}
 </head>
 <body>
 <canvas id="c"></canvas>
-<input id="nameIn" type="text" maxlength="15" placeholder="Your name..."
-  style="position:fixed;top:50%;left:50%;transform:translate(-50%,10px);width:220px;height:40px;
-  font-size:18px;text-align:center;border:2px solid #fdd835;background:#3e2723;color:#fff;
-  border-radius:8px;outline:none;display:none;z-index:999;font-family:inherit">
+<div id="nameOverlay" style="position:fixed;inset:0;display:none;z-index:999;
+  background:rgba(0,0,0,0.7);flex-direction:column;align-items:center;justify-content:center;gap:12px">
+  <div style="background:#4e342e;padding:24px 32px;border-radius:16px;border:3px solid #8d6e63;
+    display:flex;flex-direction:column;align-items:center;gap:12px">
+    <div style="font-size:22px;font-weight:bold;color:#ffcc80;font-family:inherit">🌾 Lily's Farm 🌾</div>
+    <div style="font-size:14px;color:#fff">What's your name, farmer?</div>
+    <input id="nameIn" type="text" maxlength="15" placeholder="Your name..." autocomplete="off"
+      style="width:220px;height:44px;font-size:18px;text-align:center;border:2px solid #fdd835;
+      background:#3e2723;color:#fff;border-radius:8px;outline:none;font-family:inherit">
+    <button id="nameBtn" style="width:140px;height:40px;font-size:16px;font-weight:bold;
+      background:#4caf50;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit">
+      START!</button>
+  </div>
+</div>
 <script>
 const C=document.getElementById('c'),G=C.getContext('2d');
 let W,H;
@@ -1039,61 +1049,31 @@ function drawHUD(){
     lbHitBox={x:lbX,y:lbY,w:lbW,h:lbH};
   } else lbHitBox=null;
 
-  // ─── Name prompt overlay ───
-  if(showNamePrompt) drawNamePrompt();
 }
 
 let lbHitBox=null;
 
-function drawNamePrompt(){
-  // Dim overlay
-  G.fillStyle='rgba(0,0,0,0.7)';G.fillRect(0,0,W,H);
+let namePromptBtn=null; // not used anymore but kept for compat
 
-  const bw=320,bh=180;
-  const bx=W/2-bw/2,by=H/2-bh/2;
-
-  G.fillStyle='#4e342e';G.beginPath();G.roundRect(bx,by,bw,bh,16);G.fill();
-  G.strokeStyle='#8d6e63';G.lineWidth=3;G.stroke();
-
-  G.font='bold 22px sans-serif';G.fillStyle='#ffcc80';G.textAlign='center';
-  G.fillText("🌾 Lily's Farm 🌾",W/2,by+35);
-
-  G.font='14px sans-serif';G.fillStyle='#fff';
-  G.fillText("What's your name, farmer?",W/2,by+65);
-
-  // Input is the real HTML element (positioned over canvas via CSS)
-  // Just draw a label above it
-  G.font='12px sans-serif';G.fillStyle='#aaa';G.textAlign='center';
-  G.fillText('(type below)',W/2,by+78);
-
-  // Enter button
-  const canSubmit=nameInput.length>=2;
-  G.fillStyle=canSubmit?'#4caf50':'#666';
-  G.beginPath();G.roundRect(W/2-50,by+130,100,34,8);G.fill();
-  G.font='bold 14px sans-serif';G.fillStyle='#fff';G.textAlign='center';
-  G.fillText('START!',W/2,by+152);
-
-  namePromptBtn={x:W/2-50,y:by+130,w:100,h:34};
-}
-
-let namePromptBtn=null;
-
-// Real HTML input for mobile keyboard
+// Real HTML overlay for name input
+const nameOverlay=document.getElementById('nameOverlay');
 const nameInEl=document.getElementById('nameIn');
-nameInEl.addEventListener('input',()=>{nameInput=nameInEl.value;});
-nameInEl.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&nameInput.length>=2){
-    playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
-    showNamePrompt=false;nameInEl.style.display='none';nameInEl.blur();
-    fetchLeaderboard();pushStats();
-  }
-});
-// Show/hide based on prompt state
-function syncNameInput(){
-  if(showNamePrompt){nameInEl.style.display='block';nameInEl.focus();}
-  else nameInEl.style.display='none';
+const nameBtnEl=document.getElementById('nameBtn');
+
+function submitName(){
+  const val=nameInEl.value.trim();
+  if(val.length<2)return;
+  playerName=val;nameInput=val;
+  localStorage.setItem('lilys_farm_name',playerName);
+  showNamePrompt=false;
+  nameOverlay.style.display='none';
+  fetchLeaderboard();pushStats();
 }
-if(showNamePrompt)setTimeout(syncNameInput,100);
+
+nameBtnEl.addEventListener('click',submitName);
+nameInEl.addEventListener('keydown',e=>{if(e.key==='Enter')submitName();});
+
+if(showNamePrompt){nameOverlay.style.display='flex';setTimeout(()=>nameInEl.focus(),200);}
 
 // ═══════════════════════════════════════
 // INPUT
@@ -1106,14 +1086,7 @@ C.addEventListener('mousemove',e=>{const w=s2w(e.clientX,e.clientY);targetX=w.x;
 // Click: prestige button, leaderboard toggle, name submit
 C.addEventListener('click',e=>{
   const x=e.clientX,y=e.clientY;
-  // Name prompt
-  if(showNamePrompt&&namePromptBtn){
-    if(x>=namePromptBtn.x&&x<=namePromptBtn.x+namePromptBtn.w&&y>=namePromptBtn.y&&y<=namePromptBtn.y+namePromptBtn.h&&nameInput.length>=2){
-      playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
-      showNamePrompt=false;nameInEl.style.display='none';nameInEl.blur();fetchLeaderboard();pushStats();
-    }
-    return;
-  }
+  if(showNamePrompt)return;
   // Leaderboard toggle
   if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
     lbExpanded=!lbExpanded;return;
@@ -1132,14 +1105,7 @@ C.addEventListener('touchstart',e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
     const x=t.clientX,y=t.clientY;
-    // Name prompt — show keyboard on mobile
-    if(showNamePrompt){
-      if(namePromptBtn&&x>=namePromptBtn.x&&x<=namePromptBtn.x+namePromptBtn.w&&y>=namePromptBtn.y&&y<=namePromptBtn.y+namePromptBtn.h&&nameInput.length>=2){
-        playerName=nameInput;localStorage.setItem('lilys_farm_name',playerName);
-        showNamePrompt=false;fetchLeaderboard();pushStats();
-      }
-      return;
-    }
+    if(showNamePrompt)return;
     // Leaderboard
     if(lbHitBox&&x>=lbHitBox.x&&x<=lbHitBox.x+lbHitBox.w&&y>=lbHitBox.y&&y<=lbHitBox.y+lbHitBox.h){
       lbExpanded=!lbExpanded;return;
@@ -1186,11 +1152,7 @@ function loop(t){
   if(!showNamePrompt) update(dt);
   G.clearRect(0,0,W,H);
   if(!showNamePrompt){drawWorld();drawHUD();}
-  else{
-    // Draw ground behind prompt
-    G.fillStyle='#7cb342';G.fillRect(0,0,W,H);
-    drawNamePrompt();
-  }
+  else{G.fillStyle='#7cb342';G.fillRect(0,0,W,H);}
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
