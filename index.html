@@ -626,8 +626,11 @@ function update(dt){
   // ─── Lily movement ───
   let mx=0,my=0;
   if(isMobile){
-    // Mobile: only move when joystick is active
-    if(joyActive){mx=joyDx;my=joyDy;}
+    // Mobile: only move when joystick is active, constant speed
+    if(joyActive){
+      const jm=Math.hypot(joyDx,joyDy);
+      if(jm>0.15){mx=joyDx/jm;my=joyDy/jm;} // normalize to unit vector
+    }
   } else {
     // Desktop: follow cursor
     const ddx=targetX-lily.x,ddy=targetY-lily.y,dd=Math.hypot(ddx,ddy);
@@ -636,7 +639,7 @@ function update(dt){
   const mag=Math.hypot(mx,my);
   if(mag>0.05){
     const spd=(150+speedLvl*25)*mag;
-    lily.x+=mx/mag*spd*dt*mag;lily.y+=my/mag*spd*dt*mag;
+    lily.x+=(mx/mag)*spd*dt;lily.y+=(my/mag)*spd*dt;
     lily.wf+=dt*10;
     if(Math.abs(mx)>Math.abs(my))lily.dir=mx>0?3:1;else lily.dir=my>0?0:2;
   }
