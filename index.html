@@ -815,8 +815,8 @@ function update(dt){
     });
   });
 
-  // ─── World pads — must hover 2s before coins drain ───
-  const HOVER_REQ=2; // seconds
+  // ─── World pads — 1s hover before each charge cycle ───
+  const HOVER_REQ=1;
   allPads.forEach(pad=>{
     if(pad.done)return;
     const cx=pad.x+40,cy=pad.y+30;
@@ -830,12 +830,13 @@ function update(dt){
             sfxUnlock();
             try{if(typeof pad.action==='function')pad.action(pad);}catch(e){console.error('Pad action error:',e);}
             if(!pad.repeatable)pad.done=true;
+            else pad.hoverTime=0; // reset warmup for next purchase
             floats.push({x:cx,y:cy-20,text:'✓',t:1.5,color:'#76ff03'});
           }
         }
       }
     } else {
-      pad.hoverTime=0; // reset when you walk away
+      pad.hoverTime=0;
     }
   });
 
@@ -932,7 +933,7 @@ function drawPad(pad){
   const pct=pad.paid/pad.cost;
   const pulse=.6+Math.sin(Date.now()*.004)*.3;
   const near=dist(lily,{x:cx,y:cy})<55;
-  const hovering=(pad.hoverTime||0)>=2;
+  const hovering=(pad.hoverTime||0)>=1;
 
   // Outer glow when hovering and draining
   if(near&&hovering&&coins>0){
@@ -952,9 +953,9 @@ function drawPad(pad){
   G.beginPath();G.arc(cx,cy,r,-Math.PI/2+Math.PI*2*pct,-Math.PI/2+Math.PI*2);
   G.strokeStyle='rgba(255,255,255,0.12)';G.lineWidth=5;G.stroke();
 
-  // Hover warmup ring (white, shows 0-2s progress before coins drain)
+  // Hover warmup ring (white, shows 0-1s progress before coins drain)
   if(near&&!hovering&&(pad.hoverTime||0)>0){
-    const warmPct=(pad.hoverTime||0)/2;
+    const warmPct=(pad.hoverTime||0)/1;
     G.beginPath();G.arc(cx,cy,r+4,-Math.PI/2,-Math.PI/2+Math.PI*2*warmPct);
     G.strokeStyle='rgba(255,255,255,0.5)';G.lineWidth=3;G.lineCap='round';G.stroke();
   }
