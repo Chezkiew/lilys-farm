@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Lily's Farm</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -11,6 +11,7 @@ canvas{display:block;width:100vw;height:100vh}
 </style>
 </head>
 <body>
+<div id="safeTop" style="position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top,0px);pointer-events:none"></div>
 <canvas id="c"></canvas>
 <div id="nameOverlay" style="position:fixed;inset:0;display:none;z-index:999;
   background:rgba(0,0,0,0.7);flex-direction:column;align-items:center;justify-content:center;gap:12px">
@@ -714,7 +715,14 @@ function getWorldBounds(){
 // MOBILE DETECTION + JOYSTICK
 // ═══════════════════════════════════════
 const isMobile=isTouchDevice;
-const TOP_PAD=isMobile?36:0; // offset for mobile browser chrome/notch
+// Measure actual safe area from CSS env(), fallback to generous offset on mobile
+function getTopPad(){
+  if(!isMobile)return 0;
+  const el=document.getElementById('safeTop');
+  const h=el?el.offsetHeight:0;
+  return Math.max(h,50); // at least 50px on mobile to clear URL bar
+}
+const TOP_PAD=getTopPad();
 let joyActive=false,joyDx=0,joyDy=0,joyTouchId=-1;
 let joyCenterX=0,joyCenterY=0; // spawns where you touch
 const JOY_R=50;
